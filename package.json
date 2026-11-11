@@ -14,7 +14,9 @@
     "db:rollback": "tsx db/cli.ts rollback",
     "db:status": "tsx db/cli.ts status",
     "db:seed": "tsx db/cli.ts seed",
-    "db:reset": "tsx db/cli.ts reset"
+    "db:reset": "tsx db/cli.ts reset",
+    "test": "jest",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",
@@ -28,12 +30,14 @@
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
+    "@types/jest": "^30.0.0",
     "@types/node": "^20",
     "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.5",
+    "jest": "^30.5.2",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "^5"

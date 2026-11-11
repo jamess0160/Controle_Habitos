@@ -45,17 +45,23 @@ Ordem importa: enums antes das tabelas, tabelas de domínio antes das dependente
 
 Funções puras, sem I/O e sem `new Date()` interno — **o instante atual entra sempre por parâmetro**. É o que torna a virada das 04:00 testável, e é a parte onde mora o risco do projeto.
 
-- [ ] `data_logica(ts)` e fronteiras de período por cadência (semana começando domingo)
-- [ ] geração de períodos sob demanda nas 4 cadências, com `cada_n_dias` ancorado na última conclusão
-- [ ] geração de ocorrências do modo `fixo` a partir de `dias_semana` / `dias_mes` / `horarios`
-- [ ] avaliação de meta por tipo (binário, quantificado, duração, negativo)
-- [ ] fechamento de período: `cumprido` / `congelado` / `falhou`, com consumo FIFO de congelamento
-- [ ] ganho de congelamento e teto de estoque
-- [ ] cálculo de sequência, recorde e `total_no_prazo`
-- [ ] recálculo retroativo, incluindo **re-encadeamento de `cada_n_dias`** e estorno de congelamento
-- [ ] deslocamento de âncora por pausa
+- [x] `data_logica(ts)` e fronteiras de período por cadência (semana começando domingo)
+- [x] geração de períodos sob demanda nas 4 cadências, com `cada_n_dias` ancorado na última conclusão
+- [x] geração de ocorrências do modo `fixo` a partir de `dias_semana` / `dias_mes` / `horarios`
+- [x] avaliação de meta por tipo (binário, quantificado, duração, negativo)
+- [x] fechamento de período: `cumprido` / `congelado` / `falhou`, com consumo FIFO de congelamento
+- [x] ganho de congelamento e teto de estoque
+- [x] cálculo de sequência, recorde e `total_no_prazo`
+- [x] recálculo retroativo, incluindo **re-encadeamento de `cada_n_dias`** e estorno de congelamento
+- [x] deslocamento de âncora por pausa
 
 > Puxei a cobertura de testes desta sub-etapa para cá, antes da etapa 3 que você definiu como o momento dos testes. Motivo: o schema só está validado quando essa lógica roda contra ele, e descobrir na etapa 3 que `cada_n_dias` precisa de outra coluna custa refazer migration já aplicada. São testes de função pura, baratos de escrever e sem dependência de UI. Se preferir manter tudo na etapa 3, é só mover.
+
+**Como ficou implementado.** O núcleo é um *replay*: `dominio/simulacao.ts` reexecuta a história do hábito desde `inicio_em` sobre os registros que existem agora, e devolve períodos, sequência e estoque de congelamento. As tabelas são a materialização desse resultado, não a fonte dele.
+
+A escolha resolve de graça o problema mais delicado do domínio. Como `cada_n_dias` é ancorado na última conclusão, um preenchimento retroativo move o início de todos os períodos seguintes — não existe "corrigir o período afetado", existe reencadear. Um replay puro reencadeia por construção, e o estorno de congelamento deixa de ser uma operação: na nova execução aquele congelamento simplesmente não é consumido. A camada de persistência compara o resultado com o que está no banco e escreve a diferença (etapa 3.4).
+
+Dois pontos ficaram deliberadamente fora do domínio puro, porque são de persistência: **qual** linha de `congelamento` é consumida (FIFO por `ganho_em`, decidido no repositório — o domínio só conta o estoque) e o registro de `estornado_em` nas linhas afetadas.
 
 **Fechada quando** os casos difíceis passam: registro à 01:30 contando para o dia anterior, conclusão antecipada em `cada_n_dias` encurtando o período, retroativo re-encadeando a cadeia, congelamento esgotado levando a `falhou`, pausa de 20 dias não gerando vencimento estourado.
 

@@ -81,6 +81,17 @@ Duas consequências que o código precisa respeitar:
 1. `habito_periodo.fim` é **mutável** nessa cadência — conclusão antecipada encurta o período. Nas outras cadências o `fim` é imutável.
 2. Períodos **não são pré-gerados em nenhuma cadência**: existe no máximo um período aberto por hábito, criado quando o anterior fecha. `cada_n_dias` obriga a isso, porque o próximo início depende da conclusão do atual; uniformizar as outras cadências pelo mesmo caminho evita que um período futuro nasça preso a uma versão de configuração que você ainda vai editar. O banco garante o invariante com índice único parcial.
 
+### Quando o período fecha
+
+Duas regras que caem do resto e valem registro explícito:
+
+- **Hábito positivo fecha na hora da conclusão.** Marcar o hábito hoje já soma na sequência, sem esperar o dia virar — retorno imediato é o ponto do app. Num período `semanal` que bate a meta na quarta, o período é cumprido ali, mas a próxima janela só começa no domingo seguinte (o `fim` não muda, exceto em `cada_n_dias`).
+- **Hábito negativo só fecha quando a janela termina.** Ele nasce cumprido, então fechá-lo antes afirmaria "não houve recaída" num dia que ainda está correndo. O período de hoje fica aberto, exibindo "sem recaída" como estado corrente, e fecha cumprido na virada.
+
+### Primeiro período de um hábito
+
+Nas cadências de calendário, a primeira janela é recortada no início do hábito: criar um hábito semanal numa quarta dá um primeiro período de quarta a sábado, não uma semana que começou antes de o hábito existir. A meta **não** é reduzida proporcionalmente — o primeiro período pode sair mais apertado, e o preenchimento retroativo cobre o caso de isso incomodar.
+
 ## Período e ocorrência
 
 - **Período** é a janela de avaliação. É materializado no banco quando começa, não calculado em tempo de leitura — porque a auditoria da sequência e o consumo de congelamento exigem um registro estável.

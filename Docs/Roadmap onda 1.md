@@ -79,22 +79,35 @@ Dois pontos ficaram deliberadamente fora do domínio puro, porque são de persis
 
 **Zod v4** como fonte única: o schema é escrito uma vez e o tipo sai dele por inferência, então não existe o risco de tipo e validação divergirem. Roda no servidor e no cliente, o que deixa o formulário usar a validação real em vez de uma cópia à mão.
 
-```ts
-// contracts/habito.ts — schema e tipo no mesmo módulo, usado nos dois lados
-export const criarHabito = z.object({ nome: z.string().min(1), cor: corToken })
-  .and(z.discriminatedUnion("modo", [modoFlexivel, modoFixo]));
-
-export type CriarHabito = z.infer<typeof criarHabito>;
-```
-
-- [ ] pasta `contracts/` com um módulo por recurso, schema e tipo juntos
-- [ ] request e response de cada rota, com os erros padronizados
-- [ ] helper `validar(schema, payload)` usado por todo route handler
-- [ ] `habito_config` como **união discriminada** em `modo` e em `tipo`
-- [ ] mensagens de erro em pt-BR centralizadas
-- [ ] testes de contrato: cada fixture de response valida contra o próprio schema
+- [x] pasta `contracts/` com um módulo por recurso, schema e tipo juntos
+- [x] request e response de cada rota, com os erros padronizados
+- [x] helper `validar(schema, payload)` usado por todo route handler
+- [x] `habito_config` como **união discriminada** em `modo` e em `tipo`
+- [x] mensagens de erro em pt-BR centralizadas
+- [x] testes de contrato: cada fixture de response valida contra o próprio schema
 
 > A união discriminada é o que faz a tabela de CHECKs do [Mapa do banco](mapas/Mapa%20do%20banco.md) existir também no tipo: com `modo: "fixo"`, `horarios` está presente e `meta_ocorrencias` nem compila. Sem isso o tipo vira um objeto largo com tudo opcional e null-check espalhado pelo domínio.
+
+**Como ficou implementado.** O exemplo que estava escrito aqui não compila: `z.discriminatedUnion` da v4 **não aceita intersecção como opção** (`Invalid discriminated union option at index "0"`), e não há como discriminar por duas chaves irmãs ao mesmo tempo. A saída foi aninhar — e ela acabou melhor que o plano:
+
+```ts
+// contracts/habito.ts
+export const configHabito = z.discriminatedUnion("modo", [
+  z.strictObject({ modo: z.literal("flexivel"), cadencia: cadenciaFlexivel, metaOcorrencias, notificarEm, meta, congelamento }),
+  z.strictObject({ modo: z.literal("fixo"),     cadencia: cadenciaFixa,     meta, congelamento }),
+]);
+```
+
+`cadencia` e `meta` são uniões discriminadas aninhadas, com a mesma forma de `dominio/periodo.ts` e `dominio/meta.ts`. A exclusividade fica **estrutural**: `cada_n_dias` não existe na `cadenciaFixa`, `dias_semana` existe só na variante semanal, e `metaOcorrencias` com `modo: "fixo"` nem compila. Nenhum refinamento manual replicando CHECK.
+
+Decisões que caíram da escrita:
+
+- **`z.strictObject` nos requests.** Chave desconhecida é recusada, não ignorada: num app de um cliente só, campo extra é bug do formulário, e silenciá-lo esconderia justamente o caso do `icone` que tiramos do modelo.
+- **Mensagens próprias, não o locale do Zod.** A v4 traz `pt`, mas é de Portugal ("Demasiado pequeno: esperava que o texto tivesse >= 3 caracteres"). `contracts/mensagens.ts` escreve em pt-BR, e o mapa é passado **por chamada** em `validar()` em vez de `z.config()` global — configuração global depende de um import com efeito colateral ter rodado antes, e em route handler do Next não há garantia de ordem.
+- **`validar()` devolve resultado, não lança.** O handler faz `if (!r.ok) return Response.json(r.resposta, { status: r.status })` e segue com `r.dados` estreitado.
+- **Tipo do hábito é imutável.** `editarHabito(tipo)` monta o schema a partir do tipo atual, então uma edição não pode trocar `binario` por `quantificado`. Trocar reinterpretaria o histórico pela régua errada — e no banco a FK composta `(habito_id, tipo)` propagaria a troca para as versões antigas, que então quebrariam os CHECKs de meta.
+- **WebAuthn fica frouxo de propósito.** `PublicKeyCredentialCreationOptionsJSON` e as respostas do navegador não são formato nosso; reescrevê-los em Zod criaria uma segunda definição para divergir da primeira. O que valida aquele payload é a verificação criptográfica, não um schema de forma.
+- **`POST /api/habitos/:id/retroativo` ganhou `previa: boolean`** — acréscimo ao inventário abaixo. É o que permite a tela mostrar o novo vencimento de um `cada_n_dias` **antes** de confirmar, como o Mapa de telas exige, sem inventar uma rota de simulação.
 
 ### 1.5 Rotas declaradas (stubs)
 

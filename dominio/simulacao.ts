@@ -85,6 +85,14 @@ export interface PeriodoSimulado {
   /** Quanto o período somou na sequência. */
   interacoes: number;
   congelamentoConsumido: boolean;
+  /**
+   * Congelamentos ganhos ao fechar este período.
+   *
+   * Existe porque `congelamento.ganho_por_periodo_id` é NOT NULL: a persistência
+   * precisa saber de qual período cada congelamento do estoque nasceu, e o total
+   * agregado em `ResultadoSimulacao` não responde isso.
+   */
+  congelamentosGanhos: number;
 }
 
 export interface ResultadoSimulacao {
@@ -130,6 +138,19 @@ export function simular(entrada: EntradaSimulacao): ResultadoSimulacao {
 
     const config = configVigenteEm(entrada.configs, janela.inicio);
     const agrupado = agrupar(config, janela, entrada.registros);
+
+    /*
+     * Janela do modo fixo sem nenhum momento devido não é período: não há o que
+     * cumprir nem o que perder. Acontece na primeira janela recortada (hábito
+     * seg/qua/sex criado num sábado) e em `dias_mes: [31]` num mês curto. Sem
+     * esta saída a janela fecharia como `falhou` e zeraria a sequência por uma
+     * semana em que o hábito não devia nada.
+     */
+    if (config.modo.tipo === "fixo" && agrupado.unidades.length === 0) {
+      janela = janelaSeguinte(config.cadencia, janela.fim);
+      continue;
+    }
+
     const avaliacao = avaliarPeriodo(config.meta, config.modo, agrupado.unidades);
 
     // Em cada_n_dias a conclusão encerra o período naquela data, e é dela que a
@@ -160,6 +181,7 @@ export function simular(entrada: EntradaSimulacao): ResultadoSimulacao {
         status: "aberto",
         interacoes: 0,
         congelamentoConsumido: false,
+        congelamentosGanhos: 0,
       });
       break;
     }
@@ -182,15 +204,16 @@ export function simular(entrada: EntradaSimulacao): ResultadoSimulacao {
       inicio: janela.inicio,
     });
 
+    let novosCongelamentos = 0;
     if (status === "cumprido" && config.congelamento) {
-      const novos = ganhosAoAvancar(
+      novosCongelamentos = ganhosAoAvancar(
         sequenciaAnterior,
         avaliacao.interacoes,
         config.congelamento,
         disponiveis,
       );
-      disponiveis += novos;
-      ganhos += novos;
+      disponiveis += novosCongelamentos;
+      ganhos += novosCongelamentos;
     }
 
     periodos.push({
@@ -202,6 +225,7 @@ export function simular(entrada: EntradaSimulacao): ResultadoSimulacao {
       status,
       interacoes: status === "cumprido" ? avaliacao.interacoes : 0,
       congelamentoConsumido: status === "congelado",
+      congelamentosGanhos: novosCongelamentos,
     });
 
     janela = janelaSeguinte(config.cadencia, fim);

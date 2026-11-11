@@ -37,7 +37,17 @@ Ordem importa: enums antes das tabelas, tabelas de domínio antes das dependente
 - [x] índices, inclusive os parciais (`congelamento` disponível, `habito_config` vigente)
 - [x] tipos de linha em TypeScript registrados via `Knex.TableType`
 - [x] seed de `config_app` e `credencial_senha` a partir do `.env`
-- [ ] seed de desenvolvimento: 6 hábitos cobrindo os 4 tipos e as 4 cadências, com histórico de 30 dias
+- [x] seed de desenvolvimento: 6 hábitos cobrindo os 4 tipos e as 4 cadências, com histórico de 30 dias
+
+**Como ficou o seed.** O histórico não é escrito à mão: `db/seeds/03_desenvolvimento.ts` monta só os **registros** (o que você teria tocado) e deixa `simular()` derivar períodos, ocorrências, sequência e congelamentos. Escrever o histórico à mão seria reimplementar o domínio num segundo lugar, com outro resultado.
+
+Isso fez o seed virar a primeira prova de que a saída do domínio assenta no schema — e ela encontrou três coisas, duas delas regras que faltavam:
+
+- `PeriodoSimulado` não dizia **qual** período gerou cada congelamento, e `congelamento.ganho_por_periodo_id` é NOT NULL. Virou o campo `congelamentosGanhos`.
+- Janela do modo `fixo` sem nenhum momento devido fechava como `falhou` e zerava a sequência (hábito seg/qua/sex criado num sábado). Agora não gera período.
+- `ocorrencia_status` não tinha regra de transição definida. Decidido: `perdida` quando o momento previsto passa, sem esperar o período fechar.
+
+O seed é idempotente por UUID fixo — re-semear apaga só estes 6 hábitos e reconstrói, sem tocar no que você criar à mão — e ignora `NODE_ENV=production`. `db/mapa-dominio.ts` faz a tradução linha larga → união discriminada, e é a fronteira que a etapa 3 vai reusar.
 
 **Fechada quando** `db:migrate` + `db:rollback` + `db:migrate` rodam limpos do zero, e o seed de desenvolvimento popula um banco navegável.
 

@@ -97,6 +97,23 @@ Nas cadências de calendário, a primeira janela é recortada no início do háb
 - **Período** é a janela de avaliação. É materializado no banco quando começa, não calculado em tempo de leitura — porque a auditoria da sequência e o consumo de congelamento exigem um registro estável.
 - **Ocorrência** é a unidade marcável. No modo `fixo` existe uma por momento previsto. No modo `flexivel` não há momentos previstos: os registros se ligam direto ao período e a meta é contada por soma.
 
+**Janela sem momento devido não é período.** No modo `fixo`, uma janela em que nenhum momento previsto cai simplesmente não gera período: não há o que cumprir nem o que perder, e a sequência não é tocada. Acontece em dois casos reais — hábito de segunda/quarta/sexta criado num sábado (a primeira janela, recortada no `inicio_em`, só tem o sábado) e `dias_mes: [31]` num mês de 30 dias. Sem essa regra a janela fecharia como `falhou` e zeraria a sequência por um período em que o hábito não devia nada.
+
+### Estados da ocorrência
+
+A ocorrência é um ponto no tempo, não o período que a contém. Então ela vira `perdida` assim que o momento previsto passa sem marcação, **mesmo com o período ainda aberto**:
+
+```mermaid
+stateDiagram-v2
+    [*] --> pendente
+    pendente --> cumprida: marcada
+    pendente --> perdida: o momento passou sem marcação
+    perdida --> cumprida: retroativo preenche (dentro de 7 dias)
+    cumprida --> perdida: desmarcação retroativa
+```
+
+É o que permite ao dashboard distinguir a dose de segunda que ficou para trás da dose de sexta que ainda vai acontecer — com a transição no fechamento do período, as duas apareceriam iguais numa terça. Como o modo `fixo` exige todos os momentos da janela, uma ocorrência perdida já condena o período; o preenchimento retroativo é o que reverte as duas coisas de uma vez.
+
 ### Estados do período
 
 ```mermaid

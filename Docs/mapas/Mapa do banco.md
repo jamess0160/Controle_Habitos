@@ -155,7 +155,7 @@ Unidade marcável do modo `fixo`. No modo `flexivel` esta tabela fica vazia e os
 | `id` | uuid PK | |
 | `periodo_id` | uuid FK → `habito_periodo` | |
 | `previsto_para` | timestamptz NOT NULL | data lógica + horário |
-| `status` | `ocorrencia_status` NOT NULL | `pendente` \| `cumprida` \| `perdida` |
+| `status` | `ocorrencia_status` NOT NULL | `pendente` \| `cumprida` \| `perdida` — vira `perdida` quando `previsto_para` passa, sem esperar o período fechar |
 | `cumprida_em` | timestamptz NULL | |
 
 - UNIQUE (`periodo_id`, `previsto_para`)

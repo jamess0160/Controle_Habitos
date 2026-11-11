@@ -534,3 +534,72 @@ describe("idempotência", () => {
     expect(rodar(entrada)).toEqual(rodar(entrada));
   });
 });
+
+describe("janela do modo fixo sem momento devido", () => {
+  it("não gera período quando nenhum slot cai na janela", () => {
+    // Hábito seg/qua/sex criado num sábado: a primeira janela, recortada no
+    // início, não contém nenhum dia devido.
+    const vitamina = config({
+      cadencia: { tipo: "semanal" },
+      modo: { tipo: "fixo" },
+      modoFixo: { diasSemana: [2, 4, 6] },
+      vigenteDe: d("2026-11-07"),
+    });
+
+    const resultado = rodar({
+      inicioEm: d("2026-11-07"), // sábado
+      configs: [vitamina],
+      registros: [reg("2026-11-09")],
+      hoje: "2026-11-09",
+    });
+
+    expect(resultado.periodos.map((p) => p.inicio)).toEqual(["2026-11-08"]);
+    expect(resultado.periodos[0].metaOcorrencias).toBe(3);
+  });
+
+  it("mês sem o dia marcado não quebra a sequência", () => {
+    // dias_mes [31]: fevereiro não tem o dia, e não deve custar a sequência.
+    const mensal = config({
+      cadencia: { tipo: "mensal" },
+      modo: { tipo: "fixo" },
+      modoFixo: { diasMes: [31] },
+      vigenteDe: d("2026-01-31"),
+    });
+
+    const resultado = rodar({
+      inicioEm: d("2026-01-31"),
+      configs: [mensal],
+      registros: [reg("2026-01-31")],
+      hoje: "2026-03-05",
+    });
+
+    expect(resultado.periodos.map((p) => [p.inicio, p.status])).toEqual([
+      ["2026-01-31", "cumprido"],
+      ["2026-03-01", "aberto"],
+    ]);
+    expect(resultado.sequencia.atual).toBe(1);
+  });
+});
+
+describe("origem do congelamento ganho", () => {
+  it("aponta o período que gerou cada congelamento do estoque", () => {
+    const resultado = rodar({
+      configs: [config({ congelamento: { aCada: 3, max: 2 } })],
+      registros: [reg("2026-11-01"), reg("2026-11-02"), reg("2026-11-03"), reg("2026-11-04")],
+      hoje: "2026-11-06",
+    });
+
+    expect(resultado.periodos.map((p) => [p.inicio, p.congelamentosGanhos])).toEqual([
+      ["2026-11-01", 0],
+      ["2026-11-02", 0],
+      ["2026-11-03", 1], // 3ª interação seguida
+      ["2026-11-04", 0],
+      ["2026-11-05", 0], // congelado: consumo não ganha
+      ["2026-11-06", 0],
+    ]);
+
+    const soma = resultado.periodos.reduce((t, p) => t + p.congelamentosGanhos, 0);
+    expect(soma).toBe(resultado.congelamentos.ganhos);
+    expect(resultado.periodos[4].congelamentoConsumido).toBe(true);
+  });
+});

@@ -5,6 +5,7 @@ import * as f from "./fixtures";
 import { configHabito, criarHabito, editarHabito, listaDeHabitos } from "./habito";
 import { hoje } from "./hoje";
 import { configApp, exportacao, statusPush } from "./infra";
+import { resumoDeConfig, textoDeCongelamento } from "./resumo";
 import { criarRegistro, preencherRetroativo, registroCriado, retroativo, retroativoAplicado } from "./registro";
 
 /**
@@ -370,5 +371,94 @@ describe("o dashboard carrega os casos difíceis", () => {
   it("a lista separa arquivado de ativo", () => {
     expect(f.listaDeHabitosFixture.habitos.every((h) => h.arquivadoEm === null)).toBe(true);
     expect(f.listaDeHabitosFixture.arquivados.every((h) => h.arquivadoEm !== null)).toBe(true);
+  });
+});
+
+describe("o resumo reproduz a frase escrita à mão em cada fixture", () => {
+  /*
+   * As fixtures nasceram com `resumo` digitado por fora, antes de
+   * `resumoDeConfig` existir — então elas são referência independente, e não o
+   * próprio resultado da função dando a volta. Se um ajuste de texto mudar a
+   * frase, estes casos apontam qual.
+   */
+  const todos = [...f.listaDeHabitosFixture.habitos, ...f.listaDeHabitosFixture.arquivados];
+
+  for (const habito of todos) {
+    it(`${habito.nome}: "${habito.resumo}"`, () => {
+      expect(resumoDeConfig(habito.config)).toBe(habito.resumo);
+    });
+  }
+
+  it("meta 1 não vira contagem", () => {
+    expect(
+      resumoDeConfig({
+        modo: "flexivel",
+        cadencia: { tipo: "semanal" },
+        metaOcorrencias: 1,
+        notificarEm: null,
+        meta: { tipo: "binario" },
+        congelamento: null,
+      }),
+    ).toBe("Por semana");
+  });
+
+  it("cada_n_dias com meta acima de 1 mantém a janela na frase", () => {
+    expect(
+      resumoDeConfig({
+        modo: "flexivel",
+        cadencia: { tipo: "cada_n_dias", intervalo: 15 },
+        metaOcorrencias: 2,
+        notificarEm: null,
+        meta: { tipo: "binario" },
+        congelamento: null,
+      }),
+    ).toBe("2x a cada 15 dias");
+  });
+
+  it("modo fixo nos sete dias é 'todo dia', não a enumeração", () => {
+    expect(
+      resumoDeConfig({
+        modo: "fixo",
+        cadencia: { tipo: "semanal", diasSemana: [1, 2, 3, 4, 5, 6, 7], horarios: ["07:00:00"] },
+        meta: { tipo: "binario" },
+        congelamento: null,
+      }),
+    ).toBe("Todo dia às 07:00");
+  });
+
+  it("modo fixo mensal sem horário não inventa 'às'", () => {
+    expect(
+      resumoDeConfig({
+        modo: "fixo",
+        cadencia: { tipo: "mensal", diasMes: [15, 1] },
+        meta: { tipo: "quantificado", valor: 30, unidade: "páginas" },
+        congelamento: null,
+      }),
+    ).toBe("Dias 1 e 15 do mês, 30 páginas");
+  });
+
+  it("tolerância zero é 'sem recaídas'", () => {
+    expect(
+      resumoDeConfig({
+        modo: "flexivel",
+        cadencia: { tipo: "diario" },
+        metaOcorrencias: 1,
+        notificarEm: null,
+        meta: { tipo: "negativo", tolerancia: 0 },
+        congelamento: null,
+      }),
+    ).toBe("Todo dia, sem recaídas");
+  });
+
+  it("o texto do congelamento diz o automatismo, que é o ponto dele", () => {
+    const texto = textoDeCongelamento({ aCada: 3, max: 2 });
+
+    expect(texto).toContain("A cada 3 interações no prazo");
+    expect(texto).toContain("até 2 guardados");
+    expect(texto).toContain("automaticamente");
+  });
+
+  it("sem congelamento, o texto diz o que acontece ao perder", () => {
+    expect(textoDeCongelamento(null)).toContain("zera a sequência");
   });
 });

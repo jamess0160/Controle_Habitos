@@ -12,6 +12,7 @@ import { cor, dataLogica, horario, instante, uuid } from "./comum";
 
 export const SAUDACAO = ["bom_dia", "boa_tarde", "boa_noite"] as const;
 export const saudacao = z.enum(SAUDACAO);
+export type Saudacao = z.infer<typeof saudacao>;
 
 /**
  * Progresso na forma própria de cada tipo, para a linha do dashboard.

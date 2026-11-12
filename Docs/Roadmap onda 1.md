@@ -176,11 +176,37 @@ Telas reais em Next + Tailwind, consumindo os stubs da etapa 1. Nada de backend 
   - **Existe um `public/sw.js` mínimo, sem estratégia de cache.** Ele existe porque o Chrome no Android exige service worker com handler de `fetch` para oferecer a instalação, e o critério de saída desta etapa é validar o app **instalado**. Cache offline não está na onda 1, e um service worker que serve conteúdo guardado sem isso ter sido decidido é a causa clássica de "mudei o código e o celular mostra o antigo".
 
   **Um bug que o matcher do proxy tinha e ninguém veria.** `/sw.js` recebia **307 para `/login`** — a guarda de navegação estava engolindo o service worker, então o registro falhava e a PWA não instalava. O teste de `proxy()` não pegava: ele chama a função direto e nunca passa pelo matcher, que é config lida pelo Next antes. Agora o matcher exclui `sw.js` e as extensões servidas da raiz, e há um teste que **lê o padrão do próprio `proxy.ts`** e o aplica a 15 caminhos — o Next exige literal no `config.matcher` (variável é ignorada), então uma segunda cópia no teste divergiria em silêncio.
-- [ ] 7 telas navegáveis: login, cadastro de biometria, dashboard, lista, cadastro/edição, retroativo, ajustes
-- [ ] estados que não aparecem no caminho feliz: vazio, carregando, erro, hábito pausado, dia todo cumprido, bloqueio por tentativas
-- [ ] linha do dashboard nas 4 variantes de tipo, com `🔥` e `❄` por hábito
-- [ ] formulário de cadastro em 6 passos, com o modo flexível/fixo como escolha excludente e o texto explicando o congelamento automático
+- [x] 7 telas navegáveis: login, cadastro de biometria, dashboard, lista, cadastro/edição, retroativo, ajustes
+- [x] estados que não aparecem no caminho feliz: vazio, carregando, erro, hábito pausado, dia todo cumprido, bloqueio por tentativas
+- [x] linha do dashboard nas 4 variantes de tipo, com `🔥` e `❄` por hábito
+- [x] formulário de cadastro em 6 passos, com o modo flexível/fixo como escolha excludente e o texto explicando o congelamento automático
 - [ ] validação na PWA instalada do celular — alvos de toque, alcance do polegar, leitura ao sol
+
+**Como ficaram as telas.** Oito rotas para as sete telas (cadastro e edição compartilham o formulário), em dois grupos: `(app)/` tem a barra inferior, `(tela-cheia)/` não — cadastro, edição e retroativo abrem **sobre** a navegação, porque são tarefas com começo e fim e não lugares onde se fica. `/login` e `/biometria` seguem fora dos dois.
+
+As telas buscam **no cliente** ([cliente/api.ts](../cliente/api.ts)), não em componente de servidor. Três razões concretas: a autorização é por cookie de sessão, que o `fetch` de mesma origem manda sozinho; as interações que importam (cronômetro, incremento, recaída) são de cliente de todo jeito; e os estados "carregando" e "erro" nascem de graça. O desvio de **401 para `/login`** e **409 para `/biometria`** mora no `useRecurso`, num lugar só, porque é o par exato que `exigirAcesso()` produz — repeti-lo em sete telas seria sete chances de divergir da guarda do proxy.
+
+Decisões que caíram da escrita:
+
+- **`resumoDeConfig` nasceu agora**, em [contracts/resumo.ts](../contracts/resumo.ts). A frase em linguagem natural ("Seg, qua e sex às 08:00 e 20:00") não existia em lugar nenhum: as fixtures a tinham digitada à mão. O formulário precisa dela **antes** de salvar, quando não há resposta do servidor para ler — então ou havia uma segunda implementação no cliente, ou uma só servindo os dois lados. Ficou uma só, e os testes a travam contra as sete frases escritas à mão, que por serem anteriores à função servem de referência independente. A etapa 3.2 preenche `habito.resumo` com ela.
+- **A validação do formulário é o schema do contrato, não uma cópia.** `validar(criarHabito, payload)` roda no cliente, e o erro volta com `campos[].campo` — que o formulário usa para pular ao passo do campo errado. Os números ficam como **texto** no rascunho de propósito: campo vazio vira `NaN`, o schema recusa, e a mensagem em pt-BR que aparece é a que o servidor mandaria.
+- **O rascunho ⇆ config saiu do componente** para [componentes/rascunho-de-habito.ts](../componentes/rascunho-de-habito.ts), sem React, porque é a parte que mais precisa de teste: um round-trip que perde um campo faz a edição **apagar configuração em silêncio**. São as 7 fixtures de ida e volta, mais as combinações que elas não cobrem (fixo mensal sem horário, horário em branco).
+- **O retroativo pede sempre a prévia antes de aplicar.** A tela não sabe a cadência do hábito, então não sabe de antemão se o toque vai mover a âncora de um `cada_n_dias`; com `previa: true` ela descobre com o próprio servidor e só então mostra a confirmação do novo vencimento. São duas idas por toque, num app de um usuário só.
+- **O cronômetro guarda `iniciado_em` no `sessionStorage`** e exibe `agora menos iniciado_em` recalculado, com `visibilitychange` acertando no mesmo quadro em que o app reaparece ([cliente/relogio.ts](../cliente/relogio.ts)). Nunca acumulado por tique — é a regra do mapa, e o motivo dela é o navegador estrangular timers em segundo plano.
+- **Nenhuma cor de marca.** A paleta Esmalte gastou os seis matizes nos hábitos, então o botão principal é contraste puro: quase preto no claro, quase branco no escuro. Um matiz próprio competiria com a informação da tela.
+- **Andaime de simulação no login e na biometria, só em desenvolvimento.** O stub de `GET /api/auth/estado` não sabe se existe passkey sem consultar o banco, e o `challenge` das fixtures é inventado — sem os atalhos, três dos quatro estados do login e o fluxo inteiro de primeiro acesso seriam impossíveis de percorrer. O "pular a biometria" é um botão **visível e separado**, não um `catch` que finge sucesso: a diferença entre "funcionou" e "pulamos" não pode ficar escondida. Morre na etapa 3.1.
+
+**O que as telas acharam nos contratos e nos stubs**
+
+Mesmo tipo de achado da etapa 1.5, e pelo mesmo motivo: só construindo a tela se descobre o que falta no payload.
+
+1. **`retroativo` não dizia o tipo nem a cor do hábito.** O mapa manda abrir **entrada de valor** em `quantificado` e `duracao` e simples alternância nos outros — e a tela não tinha como saber qual. Pior: a marca de `cumprido` é "disco cheio na cor do hábito", e sem a cor os sete dias saíam azuis, a mesma marca dizendo coisas diferentes em telas diferentes. Entraram `meta` (inteira, porque o campo precisa da `unidade` no rótulo) e `cor`.
+2. **Dois stubs devolviam fixture onde precisavam ecoar.** `POST /api/registros` com `valor` fixo em 700 fazia o botão "+250 ml" somar 700 na tela, e `PATCH /api/config` fazia o campo de hora voltar a 04:00 com um "Salvo." do lado — os dois indistinguíveis de bug de verdade. Agora ecoam a identidade do pedido e mantêm os **derivados** (sequência, congelamento, status) enlatados, que é justamente o que a etapa 3 vai calcular.
+3. **`passoDoCampo("config.metaOcorrencias")` caía no passo errado**, porque `"config.metaOcorrencias".startsWith("config.meta")` é verdadeiro. O erro mandava ao passo 2, onde não existe campo com aquele nome. Achado por teste, não pela tela.
+4. **Três `<Botao>` estavam dentro de `<Link>`** — conteúdo interativo dentro de conteúdo interativo. Virou `classeDeBotao()` aplicada ao próprio link.
+5. **`params` e `useParams` não convivem com `cacheComponents` sem `<Suspense>`.** As duas telas de tarefa com `:id` exigem a fronteira, tanto por `await params` no servidor (`blocking-prerender-dynamic`) quanto por `useParams` no cliente (`CLIENT_HOOK_DYNAMIC`). Com ela, as duas rotas ficam **parcialmente pré-renderizadas**: cabeçalho estático na hora, conteúdo em streaming.
+
+**O que ficou de fora de propósito:** o arraste para reordenar (persiste `habito.ordem`, é etapa 3.2) e a validação no aparelho, que depende de HTTPS com domínio estável — WebAuthn e PWA instalada não funcionam em `localhost` fora do desktop. Esse último item só fecha com o túnel da etapa 5, ou com um túnel temporário antes.
 
 **Fechada quando** você navega o app inteiro no celular com dados falsos e aprova a estrutura.
 

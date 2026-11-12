@@ -19,3 +19,4 @@ export * from "./habito";
 export * from "./hoje";
 export * from "./infra";
 export * from "./registro";
+export * from "./resumo";

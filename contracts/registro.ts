@@ -1,5 +1,6 @@
 import * as z from "zod";
-import { dataLogica, diaDaSemana, horario, instante, sequencia, uuid } from "./comum";
+import { cor, dataLogica, diaDaSemana, horario, instante, sequencia, uuid } from "./comum";
+import { meta } from "./habito";
 
 /**
  * Contrato de registro e de preenchimento retroativo.
@@ -12,6 +13,7 @@ import { dataLogica, diaDaSemana, horario, instante, sequencia, uuid } from "./c
 
 export const ORIGEM = ["app", "retroativo", "cronometro"] as const;
 export const origem = z.enum(ORIGEM);
+export type Origem = z.infer<typeof origem>;
 
 /**
  * POST /api/registros
@@ -93,6 +95,29 @@ export type DiaRetroativo = z.infer<typeof diaRetroativo>;
 export const retroativo = z.object({
   habitoId: uuid,
   nome: z.string(),
+  /**
+   * A cor do hábito.
+   *
+   * Acréscimo da etapa 2, pelo mesmo motivo de `meta`: a marca de `cumprido` é
+   * **disco cheio na cor do hábito** (seção "Paleta" do Mapa de telas), e sem a
+   * cor no payload a tela pintava os sete dias com um azul fixo — a mesma marca
+   * dizendo coisas diferentes em telas diferentes.
+   */
+  cor,
+  /**
+   * A meta vigente do hábito.
+   *
+   * Acréscimo da etapa 2, encontrado montando a tela: o
+   * [Mapa de telas](../Docs/mapas/Mapa%20de%20telas.md) manda abrir **entrada de
+   * valor** em hábito `quantificado` ou `duracao`, e simples alternância nos
+   * outros — e o payload não dizia o tipo. A tela teria de buscar
+   * `GET /api/habitos/:id` só para descobrir isso, ou adivinhar por
+   * `dias[].valor`, que é nulo justamente nos dias ainda vazios.
+   *
+   * Vai a meta inteira, não só o `tipo`: o campo de quantificado precisa da
+   * `unidade` no rótulo, e o de duração precisa saber a meta em minutos.
+   */
+  meta,
   /** Progresso do período corrente, como aparece no cabeçalho da tela. */
   periodoAtual: z
     .object({ concluidas: z.int().min(0), meta: z.int().min(1), fim: dataLogica })

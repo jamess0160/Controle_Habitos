@@ -418,6 +418,13 @@ describe("matcher do proxy", () => {
     ["/biometria", true],
     ["/habitos", true],
     ["/habitos/novo", true],
+    /*
+     * As telas de tarefa da etapa 2. Elas moram no grupo `(tela-cheia)`, que não
+     * aparece na URL — então para a guarda são caminhos sob `/habitos` como
+     * qualquer outro, e precisam estar protegidas.
+     */
+    ["/habitos/5eed0001-0000-4000-8000-000000000002/editar", true],
+    ["/habitos/5eed0001-0000-4000-8000-000000000002/retroativo", true],
     ["/ajustes", true],
     // Chamada de API redirecionada devolveria HTML 200 e quebraria o fetch.
     ["/api/hoje", false],

@@ -60,14 +60,18 @@ Schema is managed with **Knex** (migrations + seeds in `db/`), which is also the
 
 ## Current state
 
-Etapa 1 of [Docs/Roadmap onda 1.md](Docs/Roadmap%20onda%201.md) is done; etapa 2 (the screens) has not started.
+Etapa 1 is done. In etapa 2, the palette, the PWA shell and the seven screens are done; what remains is validating the installed PWA on the phone, which needs HTTPS on a stable domain (etapa 5's tunnel, or a temporary one).
 
 What exists:
 
 - `db/` — 6 Knex migrations covering the whole schema, the `globalThis` pool singleton, `db/pg-types.ts` (parses Postgres `date` as a raw string so the driver can't shift a logical day), `db/cli.ts` (wraps the Knex API rather than the `knex` binary), `db/mapa-dominio.ts` (the only place the config table's nullables are faced), and a development seed with 6 habits over 30 days.
 - `dominio/` — the rule core. `dominio/simulacao.ts` **replays** a habit's whole history from the registros that exist now and returns periods, streak and freeze stock; the tables are the materialization of that result, not its source. Retroactive edits and `cada_n_dias` re-chaining fall out of the replay.
-- `contracts/` — Zod schemas for every route, with `cadencia`/`meta` as nested discriminated unions so invalid combinations don't compile, pt-BR error messages (Zod's `pt` locale is European Portuguese), `validar()` for route handlers, and `contracts/fixtures.ts`.
-- `app/api/` — 21 route handlers, all **stubs**: real input validation, fixture output. `servidor/` has the plumbing (`exigirAcesso`, `corpo`, the session cookie) and `proxy.ts` the navigation guard. Nothing here touches the database yet, and the session cookie is a stub that believes its own value — etapa 3 replaces it.
-- `app/login/page.tsx` and `app/biometria/page.tsx` are one-line placeholders so the guard has somewhere to redirect to. `app/page.tsx` is still the `create-next-app` landing page and the layout `metadata` still says "Create Next App".
+- `contracts/` — Zod schemas for every route, with `cadencia`/`meta` as nested discriminated unions so invalid combinations don't compile, pt-BR error messages (Zod's `pt` locale is European Portuguese), `validar()` for route handlers, `contracts/fixtures.ts`, and `contracts/resumo.ts` — the **single** implementation of the habit's rule as a sentence, used by the form's preview now and by `habito.resumo` on the server in etapa 3.2.
+- `app/api/` — 21 route handlers, all **stubs**: real input validation, fixture output. Three of them deliberately don't return a raw fixture, because a canned value would make a screen look broken: `GET /api/auth/estado` computes from the session, and `POST /api/registros` / `PATCH /api/config` echo the identity of what was sent while keeping the *derived* parts (streak, freeze stock, period status) canned. `servidor/` has the plumbing (`exigirAcesso`, `corpo`, the session cookie) and `proxy.ts` the navigation guard. Nothing here touches the database yet, and the session cookie is a stub that believes its own value — etapa 3.1 replaces it.
+- `cliente/` — the mirror of `servidor/` on the browser side: `api.ts` (one error shape for every failure, network included, and the 401→`/login` / 409→`/biometria` redirect in one place), `formato.ts` (pt-BR formatting that never parses a logical day through `new Date(string)`), `relogio.ts`, `ambiente.ts`, `webauthn.ts`.
+- `componentes/` — the screens, as client components (`tela-*.tsx`), plus the shared pieces: `marca.tsx` (state is form, not colour), `ui.tsx` (touch targets decided in one place), `rascunho-de-habito.ts` (the draft ⇆ config translation, pure and tested).
+- `app/` — eight routes for the seven screens, in two groups: `(app)/` has the bottom bar, `(tela-cheia)/` doesn't (cadastro, edição and retroativo open over the navigation). `/login` and `/biometria` sit outside both. `app/manifest.ts`, `app/tema.ts` and `public/sw.js` are the PWA shell.
 
-Tests run with `npm test` (Jest 30 via `next/jest`). The SWC transform strips types without checking them, so run `npx tsc --noEmit` alongside.
+Two etapa-2 scaffolds to delete in etapa 3.1: `/login?simular=…` (three of the four login states can't be reached while the stub can't know whether a passkey exists) and the "pular a biometria (dev)" button (the fixtures' WebAuthn challenge is invented, so a real `credentials.create()` must fail).
+
+Tests run with `npm test` (Jest 30 via `next/jest`). The SWC transform strips types without checking them, so run `npx tsc --noEmit` alongside. `npm run build` is worth running too: `cacheComponents` rejects reading `params` or `useParams` outside `<Suspense>`, and only the build says so.

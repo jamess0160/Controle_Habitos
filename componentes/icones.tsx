@@ -74,3 +74,60 @@ export function Celular({ className }: Props) {
     </svg>
   );
 }
+
+export function Voltar({ className }: Props) {
+  return (
+    <svg {...comuns} className={className}>
+      <path d="M14.5 5 7.5 12l7 7" />
+    </svg>
+  );
+}
+
+export function Mais({ className }: Props) {
+  return (
+    <svg {...comuns} className={className}>
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+export function Pausa({ className }: Props) {
+  return (
+    <svg {...comuns} className={className}>
+      <path d="M9.5 5.5v13M14.5 5.5v13" />
+    </svg>
+  );
+}
+
+export function Play({ className }: Props) {
+  return (
+    <svg {...comuns} className={className}>
+      <path d="M8 5.2 18.5 12 8 18.8Z" />
+    </svg>
+  );
+}
+
+export function Arquivo({ className }: Props) {
+  return (
+    <svg {...comuns} className={className}>
+      <path d="M3.5 7.5h17v3.2h-17zM5.2 10.7v8.1h13.6v-8.1M10 14h4" />
+    </svg>
+  );
+}
+
+export function Lapis({ className }: Props) {
+  return (
+    <svg {...comuns} className={className}>
+      <path d="M16.8 3.9l3.3 3.3L8.6 18.7l-4.1.9.9-4.1z" />
+    </svg>
+  );
+}
+
+export function Calendario({ className }: Props) {
+  return (
+    <svg {...comuns} className={className}>
+      <rect x="3.5" y="5.5" width="17" height="15" rx="2.4" />
+      <path d="M3.5 10h17M8 3.5v3M16 3.5v3" />
+    </svg>
+  );
+}

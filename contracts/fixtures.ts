@@ -347,6 +347,8 @@ export const registroCriadoFixture: RegistroCriado = {
 export const retroativoFixture: Retroativo = {
   habitoId: ID.correr,
   nome: "🏃 Correr",
+  cor: habitoCorrer.cor,
+  meta: habitoCorrer.config.meta,
   periodoAtual: { concluidas: 2, meta: 3, fim: "2026-11-14" },
   sequencia: { atual: 3, recorde: 3, totalNoPrazo: 3, desde: "2026-10-18" },
   congelamentosDisponiveis: 1,

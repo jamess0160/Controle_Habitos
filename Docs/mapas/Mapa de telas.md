@@ -201,4 +201,6 @@ O que resolve é a decisão que já estava tomada: **o emoji é digitado dentro 
 
 ## Pendências
 
-1. **Confirmação de recaída** em hábito `negativo` — confirmar sempre, ou permitir desfazer em seguida? Desfazer tende a ser menos atrito.
+1. **Confirmação de recaída** em hábito `negativo` — confirmar sempre, ou permitir desfazer em seguida? Desfazer tende a ser menos atrito. A etapa 2 implementou o que está mapeado (confirmar), então a pendência segue aberta sem bloquear nada.
+2. **Desmarcar no próprio dashboard.** A linha de `GET /api/hoje` não carrega `registroId`, e `DELETE /api/registros/:id` precisa dele — então uma marcação por engano só se corrige abrindo o retroativo daquele hábito. É coerente com "toque na linha abre o retroativo", mas é mais atrito que um toque de volta na marca. Decidir na etapa 3.3: acrescentar `registroId` à linha, ou manter o retroativo como único caminho de correção.
+3. **`de` obrigatório ao pausar.** `POST /api/habitos/:id/pausa` exige `de`, e o cliente não tem como saber o dia lógico — às 02:00 ele ainda é o de ontem. A etapa 2 resolveu oferecendo o palpite do aparelho num campo **visível e corrigível**, em vez de aplicá-lo em silêncio. O conserto definitivo é `de` opcional significando "agora", como `criarRegistro.dataLogica` já faz.

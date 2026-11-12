@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Controle de hábitos">
+  <rect width="512" height="512" fill="#0b0e14"/>
+  <circle cx="256" cy="256" r="150" fill="#7aa2ff"/>
+  <path d="M196 262 L238 304 L318 212" fill="none" stroke="#0b0e14" stroke-width="38"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

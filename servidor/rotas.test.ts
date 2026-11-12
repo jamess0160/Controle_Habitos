@@ -7,6 +7,8 @@
  * validação de entrada está realmente ligada em cada rota que escreve.
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { NextRequest } from "next/server";
 
 /*
@@ -373,5 +375,62 @@ describe("o cookie percorre o fluxo de primeiro acesso", () => {
 
     await authReset(post({ confirmacao: "RESETAR BIOMETRIA" }));
     expect(lerSessao(jar.get(COOKIE_SESSAO))).toBeNull();
+  });
+});
+
+/**
+ * O matcher do proxy, lido do próprio arquivo.
+ *
+ * Esta é a única parte da guarda que os testes acima **não** alcançam: eles
+ * chamam `proxy()` direto, e o matcher é config consumida pelo Next antes de a
+ * função rodar. Foi por ali que passou um bug real — o `/sw.js` recebia 307 para
+ * `/login`, e sem registrar o service worker a PWA não instala.
+ *
+ * O padrão é lido do [proxy.ts](../proxy.ts) em vez de copiado porque o Next
+ * exige literal no `config.matcher` (variável é ignorada), e uma segunda cópia
+ * aqui divergiria em silêncio. A comparação usa `RegExp` nativa, que aproxima o
+ * path-to-regexp do Next o suficiente para este padrão: um grupo único com
+ * lookahead negativo.
+ */
+describe("matcher do proxy", () => {
+  const fonte = readFileSync(join(__dirname, "..", "proxy.ts"), "utf8");
+
+  /*
+   * Pega a linha do padrão pelo começo dele, em vez de casar o literal com um
+   * regex cheio de escapes — o padrão é todo feito de barras invertidas, e um
+   * regex para extraí-lo fica ilegível e frágil. `JSON.parse` desfaz os escapes
+   * do literal TypeScript, que são os mesmos do JSON.
+   */
+  const linha = fonte
+    .split("\n")
+    .map((l) => l.trim().replace(/,$/, ""))
+    .find((l) => l.startsWith('"/((?!api'));
+
+  it("existe no arquivo", () => {
+    expect(linha).toBeDefined();
+  });
+
+  const padrao = new RegExp(`^${JSON.parse(linha ?? '""') as string}$`);
+
+  it.each([
+    ["/", true],
+    ["/login", true],
+    ["/biometria", true],
+    ["/habitos", true],
+    ["/habitos/novo", true],
+    ["/ajustes", true],
+    // Chamada de API redirecionada devolveria HTML 200 e quebraria o fetch.
+    ["/api/hoje", false],
+    ["/api/auth/estado", false],
+    // Sem isto a PWA não instala.
+    ["/sw.js", false],
+    ["/manifest.webmanifest", false],
+    ["/icone-192.png", false],
+    ["/icone-512.png", false],
+    ["/icon.svg", false],
+    ["/apple-icon.png", false],
+    ["/_next/static/chunks/main.js", false],
+  ])("%s é guardado: %s", (caminho, esperado) => {
+    expect(padrao.test(caminho)).toBe(esperado);
   });
 });

@@ -49,15 +49,29 @@ function paraOnde(request: NextRequest, caminho: string) {
 }
 
 /**
- * `api` fica fora da guarda **de propósito**.
+ * O que fica fora da guarda, e por quê.
  *
- * Redirecionar uma chamada de API para `/login` devolveria HTML com status 200,
- * e o `fetch` do cliente quebraria num erro de parse em vez de receber o 401 que
- * sabe tratar. Cada route handler se protege com `exigirAcesso()`.
+ * **`api`**, de propósito: redirecionar uma chamada de API para `/login`
+ * devolveria HTML com status 200, e o `fetch` do cliente quebraria num erro de
+ * parse em vez de receber o 401 que sabe tratar. Cada route handler se protege
+ * com `exigirAcesso()`.
  *
- * O resto da exclusão evita que a guarda derrube CSS, JS e ícones — sem matcher
- * o proxy roda até em `_next/static`.
+ * **`sw.js`**, porque senão a PWA não instala. O service worker é buscado pelo
+ * navegador sem passar por tela nenhuma; redirecioná-lo para o login faz o
+ * registro falhar, e sem service worker o Chrome no Android não oferece a
+ * instalação do app. Foi exatamente o que aconteceu na primeira versão deste
+ * matcher — a guarda respondia 307 para `/sw.js`.
+ *
+ * **O resto**, para a guarda não derrubar estático: sem matcher o proxy roda até
+ * em `_next/static`. As extensões cobrem o que é servido da raiz por `public/`.
+ *
+ * Os valores precisam ser literais: o Next analisa este `matcher` em tempo de
+ * build e **ignora** variável. Por isso o padrão está escrito aqui e o teste em
+ * [servidor/rotas.test.ts](servidor/rotas.test.ts) o lê deste arquivo em vez de
+ * manter uma segunda cópia.
  */
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\.(?:png|svg|webmanifest)$).*)"],
+  matcher: [
+    "/((?!api|_next/static|_next/image|sw\\.js|.*\\.(?:png|svg|ico|webmanifest|js|css|json|txt|woff2)$).*)",
+  ],
 };

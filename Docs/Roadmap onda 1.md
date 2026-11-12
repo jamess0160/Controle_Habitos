@@ -165,7 +165,17 @@ Corrigido com dois hábitos ativos novos (🤸 Alongar, 🥤 Sem refrigerante) e
 Telas reais em Next + Tailwind, consumindo os stubs da etapa 1. Nada de backend de verdade aqui.
 
 - [x] paleta de cores fechada (resolve a pendência do [Mapa de telas](mapas/Mapa%20de%20telas.md)) e tokens em `@theme inline` — **Esmalte**, medida e registrada na seção "Paleta" do mapa; o custo dela é que **estado passa a ser forma, não cor**
-- [ ] shell da PWA: manifest, ícones, barra inferior de 3 destinos, tema claro/escuro
+- [x] shell da PWA: manifest, ícones, barra inferior de 3 destinos, tema claro/escuro
+
+  **Como ficou.** `app/manifest.ts` em `standalone`, ícones gerados de [public/icone.svg](../public/icone.svg) com o `sharp` que já vem no Next (192, 512 e o `apple-icon` de 180), e o grupo de rotas `app/(app)/` separando o que tem barra do que não tem — `/login` e `/biometria` ficam fora, porque uma barra de três destinos numa tela de onde não se pode sair ofereceria caminhos que o proxy recusaria.
+
+  Três decisões que não eram óbvias:
+
+  - **O tema tem três estados, não dois.** "Sistema" é a *ausência* do atributo `data-tema`, e é o que faz o app acompanhar a virada automática do celular ao anoitecer sem listener. Quem aplica é um script **inline e síncrono** no `<head>`: sem ele o app pinta no tema do sistema e o React corrige depois, o que aparece como flash branco ao abrir no escuro — às 6:30 da manhã, que é um dos dois horários de uso.
+  - **O tema é lido com `useSyncExternalStore`, não `useState` + efeito.** Ele mora no `localStorage` e no atributo do `<html>`, ou seja é estado externo ao React; ler no efeito e corrigir com `setState` é o que o `react-hooks/set-state-in-effect` recusa — e a regra está certa, porque o valor já foi aplicado antes de o React existir.
+  - **Existe um `public/sw.js` mínimo, sem estratégia de cache.** Ele existe porque o Chrome no Android exige service worker com handler de `fetch` para oferecer a instalação, e o critério de saída desta etapa é validar o app **instalado**. Cache offline não está na onda 1, e um service worker que serve conteúdo guardado sem isso ter sido decidido é a causa clássica de "mudei o código e o celular mostra o antigo".
+
+  **Um bug que o matcher do proxy tinha e ninguém veria.** `/sw.js` recebia **307 para `/login`** — a guarda de navegação estava engolindo o service worker, então o registro falhava e a PWA não instalava. O teste de `proxy()` não pegava: ele chama a função direto e nunca passa pelo matcher, que é config lida pelo Next antes. Agora o matcher exclui `sw.js` e as extensões servidas da raiz, e há um teste que **lê o padrão do próprio `proxy.ts`** e o aplica a 15 caminhos — o Next exige literal no `config.matcher` (variável é ignorada), então uma segunda cópia no teste divergiria em silêncio.
 - [ ] 7 telas navegáveis: login, cadastro de biometria, dashboard, lista, cadastro/edição, retroativo, ajustes
 - [ ] estados que não aparecem no caminho feliz: vazio, carregando, erro, hábito pausado, dia todo cumprido, bloqueio por tentativas
 - [ ] linha do dashboard nas 4 variantes de tipo, com `🔥` e `❄` por hábito

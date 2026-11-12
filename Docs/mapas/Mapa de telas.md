@@ -166,7 +166,39 @@ Visão de longo prazo que o retroativo de 7 dias não cobre. Fica fora da primei
 
 Nada disso exige coluna nova: `habito_periodo`, `registro`, `congelamento` e `habito_streak` já guardam o necessário.
 
+## Paleta
+
+Fechada na etapa 2: **Esmalte**, matiz saturado e bem separado. Os valores vivem em [app/globals.css](../../app/globals.css); os nomes são o enum `COR` de [contracts/comum.ts](../../contracts/comum.ts) e estão gravados em `habito.cor`, então trocar um nome exige migration e trocar um valor não.
+
+| Cor | Claro | L* | vs card | Escuro | L* | vs card |
+|---|---|---|---|---|---|---|
+| `roxo` | `#7e22ce` | 37.9 | 6.98 | `#b06bfb` | 58.7 | 5.26 |
+| `azul` | `#1d4ed8` | 39.0 | 6.70 | `#7aa2ff` | 67.4 | 7.00 |
+| `vermelho` | `#be123c` | 40.7 | 6.29 | `#fb7185` | 65.0 | 6.47 |
+| `ciano` | `#0e7490` | 45.1 | 5.36 | `#38bdd8` | 71.0 | 7.83 |
+| `verde` | `#15803d` | 46.9 | 5.02 | `#4ade80` | 79.2 | 10.00 |
+| `ambar` | `#c2690a` | 53.6 | 3.95 | `#fcd34d` | 85.9 | 12.09 |
+
+As seis passam 3:1 contra a superfície do card nos dois temas, que é a régua de **marca** (WCAG 1.4.11) — o filete de 3 px e o disco não são texto. No claro, só `ambar` fica abaixo de 4.5:1, então o nome do hábito nunca é pintado com a cor dele: a cor vai para o filete e para o disco, e o nome fica em `--texto`.
+
+### Duas consequências que o Esmalte impõe ao resto do design
+
+**Estado é forma, não cor.** As seis cores ocupam a roda inteira, então não sobra matiz para `cumprido`, `falhou` e `congelado` — um hábito `verde` cumprido ficaria verde duas vezes, e um `vermelho` cumprido ficaria vermelho com cara de falha. A marcação passa a ser:
+
+| Estado | Marca |
+|---|---|
+| aberto | anel na cor do hábito |
+| cumprido | disco cheio na cor do hábito, com `✓` |
+| congelado | anel pontilhado com `❄`, em `--texto-fraco` |
+| falhou | anel riscado com `✕`, em `--texto-fraco` |
+| pausado | linha inteira a 52% de opacidade |
+
+`falhou` e `congelado` ficam no cinza de propósito: o glifo carrega o significado, e dar matiz a eles reintroduziria a colisão que o Esmalte não tem como absorver.
+
+**A cor nunca é o único identificador.** No claro as seis cabem numa faixa de 15.7 pontos de L*, e três pares ficam a menos de 2 pontos (`roxo`/`azul`, `azul`/`vermelho`, `ciano`/`verde`) — num disco de 20 px ao sol, ou para quem tem deficiência de visão de cor, esses pares colapsam na mesma mancha. **Isso não é corrigível**: num card quase branco o teto para passar 3:1 é L* ≈ 60, e seis cores separadas por 8 pontos precisariam de 40 pontos de faixa. Qualquer conjunto de seis cores vivas bate nesse limite.
+
+O que resolve é a decisão que já estava tomada: **o emoji é digitado dentro do nome** (`💧 Água`), e não há campo de ícone. 💧 contra 🏃 contra 💊 é o identificador primário; a cor é reforço. Toda tela precisa manter isso — nenhuma lista, nenhum gráfico de onda 2 pode identificar hábito por cor sozinha.
+
 ## Pendências
 
-1. **Paleta de cores** — definir a lista fechada antes da tela de cadastro, para `cor` ser token e não texto livre. Decidir na etapa de layout do [roadmap](../Roadmap%20onda%201.md).
-2. **Confirmação de recaída** em hábito `negativo` — confirmar sempre, ou permitir desfazer em seguida? Desfazer tende a ser menos atrito.
+1. **Confirmação de recaída** em hábito `negativo` — confirmar sempre, ou permitir desfazer em seguida? Desfazer tende a ser menos atrito.

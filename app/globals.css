@@ -1,26 +1,133 @@
 @import "tailwindcss";
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   Paleta Esmalte — decidida na etapa 2, fecha a pendência 1 do Mapa de telas.
+
+   Os seis nomes vêm do enum `COR` em `contracts/comum.ts` e estão gravados em
+   `habito.cor` no banco: trocar um **nome** exige migration, trocar um **valor**
+   não. Por isso só os valores vivem aqui.
+
+   A tese do Esmalte é matiz saturado e bem separado, e ela tem um custo que
+   governa o resto do design: **não sobra matiz para o estado**. As seis cores
+   ocupam a roda inteira, então `cumprido`, `falhou` e `congelado` não podem ser
+   cor — um hábito `verde` cumprido ficaria verde duas vezes, e um hábito
+   `vermelho` cumprido ficaria vermelho com cara de falha. Aqui o estado é
+   **forma**: disco cheio, anel, anel pontilhado, anel riscado. Ver
+   `--estado-*` no fim do bloco.
+
+   Os valores foram medidos, não escolhidos no olho — números em
+   `Docs/mapas/Mapa de telas.md`, seção "Paleta".
+   ═══════════════════════════════════════════════════════════════════════════ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Superfícies. O cinza tem viés azul, para acompanhar a frieza dos matizes. */
+  --superficie: #eef1f6;
+  --cartao: #ffffff;
+  --texto: #0e1420;
+  --texto-fraco: #5d6878;
+  --linha: #dfe4ec;
+  --linha-forte: #c2cad8;
+  --trilha: #e3e8f0;
+
+  /* As seis cores de hábito, em ordem de luminosidade (L* 37.9 → 53.6). */
+  --habito-roxo: #7e22ce;
+  --habito-azul: #1d4ed8;
+  --habito-vermelho: #be123c;
+  --habito-ciano: #0e7490;
+  --habito-verde: #15803d;
+  --habito-ambar: #c2690a;
+
+  /* Texto sobre a cor do hábito (disco cheio de "cumprido"). */
+  --sobre-habito: #ffffff;
+
+  /*
+   * Estado é forma, não cor.
+   *
+   * `cumprido` é o disco preenchido **na cor do próprio hábito**, então não tem
+   * token: quem pinta é `--habito-*`. `falhou` e `congelado` ficam no cinza de
+   * texto fraco de propósito — o ✕ e o ❄ carregam o significado, e dar matiz a
+   * eles reintroduziria a colisão que o Esmalte não tem como absorver.
+   */
+  --estado-falhou: var(--texto-fraco);
+  --estado-congelado: var(--texto-fraco);
 }
 
+/* Sistema no escuro, sem escolha explícita do usuário. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-tema="claro"]) {
+    --superficie: #0b0e14;
+    --cartao: #151a24;
+    --texto: #e8edf6;
+    --texto-fraco: #8b95a6;
+    --linha: #222a38;
+    --linha-forte: #36414f;
+    --trilha: #222a38;
+
+    /* L* 58.7 → 85.9: no escuro a faixa útil é bem mais larga que no claro. */
+    --habito-roxo: #b06bfb;
+    --habito-vermelho: #fb7185;
+    --habito-azul: #7aa2ff;
+    --habito-ciano: #38bdd8;
+    --habito-verde: #4ade80;
+    --habito-ambar: #fcd34d;
+
+    --sobre-habito: #0b0e14;
+  }
+}
+
+/* Escolha explícita vence o sistema nos dois sentidos. */
+:root[data-tema="escuro"] {
+  --superficie: #0b0e14;
+  --cartao: #151a24;
+  --texto: #e8edf6;
+  --texto-fraco: #8b95a6;
+  --linha: #222a38;
+  --linha-forte: #36414f;
+  --trilha: #222a38;
+
+  --habito-roxo: #b06bfb;
+  --habito-vermelho: #fb7185;
+  --habito-azul: #7aa2ff;
+  --habito-ciano: #38bdd8;
+  --habito-verde: #4ade80;
+  --habito-ambar: #fcd34d;
+
+  --sobre-habito: #0b0e14;
+}
+
+/*
+ * `inline` é obrigatório aqui.
+ *
+ * Sem ele o Tailwind copiaria o **valor** do token para dentro da utility, e as
+ * redefinições de tema acima deixariam de surtir efeito. Com `inline` a utility
+ * referencia a var, que é o que faz claro/escuro funcionar sem recompilar.
+ */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-superficie: var(--superficie);
+  --color-cartao: var(--cartao);
+  --color-texto: var(--texto);
+  --color-texto-fraco: var(--texto-fraco);
+  --color-linha: var(--linha);
+  --color-linha-forte: var(--linha-forte);
+  --color-trilha: var(--trilha);
+
+  --color-habito-azul: var(--habito-azul);
+  --color-habito-ciano: var(--habito-ciano);
+  --color-habito-verde: var(--habito-verde);
+  --color-habito-ambar: var(--habito-ambar);
+  --color-habito-vermelho: var(--habito-vermelho);
+  --color-habito-roxo: var(--habito-roxo);
+  --color-sobre-habito: var(--sobre-habito);
+
+  --color-falhou: var(--estado-falhou);
+  --color-congelado: var(--estado-congelado);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--superficie);
+  color: var(--texto);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }

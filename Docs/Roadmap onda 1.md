@@ -164,7 +164,7 @@ Corrigido com dois hábitos ativos novos (🤸 Alongar, 🥤 Sem refrigerante) e
 
 Telas reais em Next + Tailwind, consumindo os stubs da etapa 1. Nada de backend de verdade aqui.
 
-- [ ] paleta de cores fechada (resolve a pendência do [Mapa de telas](mapas/Mapa%20de%20telas.md)) e tokens em `@theme inline`
+- [x] paleta de cores fechada (resolve a pendência do [Mapa de telas](mapas/Mapa%20de%20telas.md)) e tokens em `@theme inline` — **Esmalte**, medida e registrada na seção "Paleta" do mapa; o custo dela é que **estado passa a ser forma, não cor**
 - [ ] shell da PWA: manifest, ícones, barra inferior de 3 destinos, tema claro/escuro
 - [ ] 7 telas navegáveis: login, cadastro de biometria, dashboard, lista, cadastro/edição, retroativo, ajustes
 - [ ] estados que não aparecem no caminho feliz: vazio, carregando, erro, hábito pausado, dia todo cumprido, bloqueio por tentativas

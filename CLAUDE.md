@@ -60,4 +60,14 @@ Schema is managed with **Knex** (migrations + seeds in `db/`), which is also the
 
 ## Current state
 
-The app itself is still the unmodified `create-next-app` scaffold — `app/page.tsx` is the template landing page and `metadata` in the layout still says "Create Next App". No database, schema, migrations, auth, or domain code exists yet; the maps above describe what is to be built.
+Etapa 1 of [Docs/Roadmap onda 1.md](Docs/Roadmap%20onda%201.md) is done; etapa 2 (the screens) has not started.
+
+What exists:
+
+- `db/` — 6 Knex migrations covering the whole schema, the `globalThis` pool singleton, `db/pg-types.ts` (parses Postgres `date` as a raw string so the driver can't shift a logical day), `db/cli.ts` (wraps the Knex API rather than the `knex` binary), `db/mapa-dominio.ts` (the only place the config table's nullables are faced), and a development seed with 6 habits over 30 days.
+- `dominio/` — the rule core. `dominio/simulacao.ts` **replays** a habit's whole history from the registros that exist now and returns periods, streak and freeze stock; the tables are the materialization of that result, not its source. Retroactive edits and `cada_n_dias` re-chaining fall out of the replay.
+- `contracts/` — Zod schemas for every route, with `cadencia`/`meta` as nested discriminated unions so invalid combinations don't compile, pt-BR error messages (Zod's `pt` locale is European Portuguese), `validar()` for route handlers, and `contracts/fixtures.ts`.
+- `app/api/` — 21 route handlers, all **stubs**: real input validation, fixture output. `servidor/` has the plumbing (`exigirAcesso`, `corpo`, the session cookie) and `proxy.ts` the navigation guard. Nothing here touches the database yet, and the session cookie is a stub that believes its own value — etapa 3 replaces it.
+- `app/login/page.tsx` and `app/biometria/page.tsx` are one-line placeholders so the guard has somewhere to redirect to. `app/page.tsx` is still the `create-next-app` landing page and the layout `metadata` still says "Create Next App".
+
+Tests run with `npm test` (Jest 30 via `next/jest`). The SWC transform strips types without checking them, so run `npx tsc --noEmit` alongside.

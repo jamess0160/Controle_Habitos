@@ -1,8 +1,19 @@
-import type { EstadoAuth, LoginConcluido, PasskeyCadastrada } from "./auth";
+import type {
+  BiometriaResetada,
+  EstadoAuth,
+  LoginConcluido,
+  OpcoesWebauthn,
+  PasskeyCadastrada,
+} from "./auth";
 import type { Habito, ListaDeHabitos } from "./habito";
 import type { Hoje } from "./hoje";
 import type { ConfigApp, Exportacao, StatusPush } from "./infra";
-import type { RegistroCriado, Retroativo, RetroativoAplicado } from "./registro";
+import type {
+  RegistroCriado,
+  RegistroRemovido,
+  Retroativo,
+  RetroativoAplicado,
+} from "./registro";
 
 /**
  * Fixtures dos responses.
@@ -20,10 +31,15 @@ const ID = {
   agua: "5eed0001-0000-4000-8000-000000000001",
   correr: "5eed0001-0000-4000-8000-000000000002",
   vitamina: "5eed0001-0000-4000-8000-000000000006",
+  alongar: "5eed0001-0000-4000-8000-000000000007",
+  refrigerante: "5eed0001-0000-4000-8000-000000000008",
   periodoAgua: "5eed0002-0000-4000-8000-000000000001",
   periodoCorrer: "5eed0002-0000-4000-8000-000000000002",
   periodoVitamina: "5eed0002-0000-4000-8000-000000000003",
-  ocorrenciaVitamina: "5eed0003-0000-4000-8000-000000000001",
+  periodoAlongar: "5eed0002-0000-4000-8000-000000000004",
+  periodoRefrigerante: "5eed0002-0000-4000-8000-000000000005",
+  ocorrenciaVitaminaManha: "5eed0003-0000-4000-8000-000000000001",
+  ocorrenciaVitaminaNoite: "5eed0003-0000-4000-8000-000000000002",
   registro: "5eed0004-0000-4000-8000-000000000001",
 } as const;
 
@@ -78,11 +94,11 @@ export const habitoVitamina: Habito = {
   ordem: 3,
   config: {
     modo: "fixo",
-    cadencia: { tipo: "semanal", diasSemana: [2, 4, 6], horarios: ["08:00:00"] },
+    cadencia: { tipo: "semanal", diasSemana: [2, 4, 6], horarios: ["08:00:00", "20:00:00"] },
     meta: { tipo: "binario" },
     congelamento: { aCada: 3, max: 2 },
   },
-  resumo: "Seg, qua e sex às 08:00",
+  resumo: "Seg, qua e sex às 08:00 e 20:00",
   sequencia: { atual: 9, recorde: 9, totalNoPrazo: 9, desde: "2026-10-12" },
   congelamentosDisponiveis: 2,
   pausa: null,
@@ -110,6 +126,56 @@ export const habitoPausado: Habito = {
   arquivadoEm: null,
 };
 
+/**
+ * O tipo `duracao` ativo.
+ *
+ * Existe separado do 🧘 Meditar porque aquele é a fixture do **estado pausado** —
+ * e hábito pausado não rende linha no dashboard. Sem este, o dashboard nunca
+ * mostraria a linha do cronômetro, que é a interação mais complicada da etapa 3.
+ */
+export const habitoAlongar: Habito = {
+  id: ID.alongar,
+  nome: "🤸 Alongar",
+  cor: "verde",
+  inicioEm: "2026-10-20",
+  ordem: 5,
+  config: {
+    modo: "flexivel",
+    cadencia: { tipo: "diario" },
+    metaOcorrencias: 1,
+    notificarEm: "19:00:00",
+    meta: { tipo: "duracao", minutos: 15 },
+    congelamento: { aCada: 5, max: 2 },
+  },
+  resumo: "Todo dia, 15 min",
+  sequencia: { atual: 6, recorde: 6, totalNoPrazo: 6, desde: "2026-11-05" },
+  congelamentosDisponiveis: 1,
+  pausa: null,
+  arquivadoEm: null,
+};
+
+/** O tipo `negativo` ativo — o arquivado não aparece no dashboard. */
+export const habitoRefrigerante: Habito = {
+  id: ID.refrigerante,
+  nome: "🥤 Sem refrigerante",
+  cor: "ambar",
+  inicioEm: "2026-09-01",
+  ordem: 6,
+  config: {
+    modo: "flexivel",
+    cadencia: { tipo: "mensal" },
+    metaOcorrencias: 1,
+    notificarEm: null,
+    meta: { tipo: "negativo", tolerancia: 2 },
+    congelamento: null,
+  },
+  resumo: "Por mês, até 2 recaídas",
+  sequencia: { atual: 2, recorde: 2, totalNoPrazo: 2, desde: "2026-09-01" },
+  congelamentosDisponiveis: 0,
+  pausa: null,
+  arquivadoEm: null,
+};
+
 export const habitoArquivado: Habito = {
   id: "5eed0001-0000-4000-8000-000000000009",
   nome: "🚬 Parar de fumar",
@@ -132,15 +198,32 @@ export const habitoArquivado: Habito = {
 };
 
 export const listaDeHabitosFixture: ListaDeHabitos = {
-  habitos: [habitoAgua, habitoCorrer, habitoVitamina, habitoPausado],
+  habitos: [
+    habitoAgua,
+    habitoCorrer,
+    habitoVitamina,
+    habitoPausado,
+    habitoAlongar,
+    habitoRefrigerante,
+  ],
   arquivados: [habitoArquivado],
 };
 
 /**
  * Dashboard de uma terça-feira à tarde.
  *
- * Cobre as quatro formas de progresso e as duas linhas que um hábito fixo com
- * horário gera — a tela precisa resolver isso no layout, não só no caminho feliz.
+ * O payload é por **interação devida**, não por hábito, e esta fixture existe
+ * para a etapa 2 não descobrir isso tarde. Ela carrega de propósito:
+ *
+ * - as quatro formas de progresso, inclusive `duracao` — a linha do cronômetro;
+ * - **duas linhas do mesmo hábito fixo**, uma por horário, com a dose da manhã
+ *   cumprida e a da noite ainda pendente. É a distinção que o estado da
+ *   ocorrência existe para permitir, e o caso que obriga a linha a não ser
+ *   indexada por `habitoId`;
+ * - nenhum hábito arquivado nem pausado, que não rendem interação devida.
+ *
+ * O 🧘 Meditar (pausado) e o 🚬 Parar de fumar (arquivado) aparecem na lista de
+ * hábitos e **não** aqui — é o que mantém as duas fixtures coerentes entre si.
  */
 export const hojeFixture: Hoje = {
   saudacao: "boa_tarde",
@@ -172,28 +255,55 @@ export const hojeFixture: Hoje = {
       sequencia: 3,
       congelamentos: 1,
     },
+    // As duas doses de hoje do mesmo hábito fixo: a meta conta as ocorrências
+    // devidas no período (3 dias x 2 horários = 6), e as duas linhas repetem a
+    // mesma sequência porque ela é do hábito, não da ocorrência.
     {
       habitoId: ID.vitamina,
       nome: "💊 Vitamina D",
       cor: "azul",
       periodoId: ID.periodoVitamina,
-      ocorrenciaId: ID.ocorrenciaVitamina,
+      ocorrenciaId: ID.ocorrenciaVitaminaManha,
       horario: "08:00:00",
       concluida: true,
-      progresso: { tipo: "binario", concluidas: 1, meta: 3 },
+      progresso: { tipo: "binario", concluidas: 3, meta: 6 },
       sequencia: 9,
       congelamentos: 2,
     },
     {
-      habitoId: habitoArquivado.id,
-      nome: "🚬 Parar de fumar",
+      habitoId: ID.vitamina,
+      nome: "💊 Vitamina D",
+      cor: "azul",
+      periodoId: ID.periodoVitamina,
+      ocorrenciaId: ID.ocorrenciaVitaminaNoite,
+      horario: "20:00:00",
+      concluida: false,
+      progresso: { tipo: "binario", concluidas: 3, meta: 6 },
+      sequencia: 9,
+      congelamentos: 2,
+    },
+    {
+      habitoId: ID.alongar,
+      nome: "🤸 Alongar",
+      cor: "verde",
+      periodoId: ID.periodoAlongar,
+      ocorrenciaId: null,
+      horario: null,
+      concluida: false,
+      progresso: { tipo: "duracao", acumulado: 0, meta: 15 },
+      sequencia: 6,
+      congelamentos: 1,
+    },
+    {
+      habitoId: ID.refrigerante,
+      nome: "🥤 Sem refrigerante",
       cor: "ambar",
-      periodoId: "5eed0002-0000-4000-8000-000000000009",
+      periodoId: ID.periodoRefrigerante,
       ocorrenciaId: null,
       horario: null,
       concluida: true,
       progresso: { tipo: "negativo", recaidas: 0, tolerancia: 2 },
-      sequencia: 44,
+      sequencia: 2,
       congelamentos: 0,
     },
   ],
@@ -393,4 +503,58 @@ export const exportacaoFixture: Exportacao = {
       criadoEm: "2026-11-07T01:30:00.000-03:00",
     },
   ],
+};
+
+// ─── WebAuthn ────────────────────────────────────────────────────────────────
+
+/**
+ * Opções de criação da passkey, no formato da especificação.
+ *
+ * Valores plausíveis, não funcionais: um `challenge` de fixture nunca passaria
+ * na verificação do navegador. Servem para a tela de cadastro de biometria da
+ * etapa 2 ter o shape certo em mãos; na etapa 3.1 quem monta isto é a
+ * biblioteca de WebAuthn.
+ */
+export const opcoesRegistroFixture: OpcoesWebauthn = {
+  challenge: "ZmFrZS1jaGFsbGVuZ2UtZGUtcmVnaXN0cm8",
+  rp: { id: "habitos.exemplo.dev", name: "Controle de hábitos" },
+  user: {
+    id: "dXN1YXJpby11bmljbw",
+    name: "tiago",
+    displayName: "Tiago",
+  },
+  pubKeyCredParams: [
+    { type: "public-key", alg: -7 },
+    { type: "public-key", alg: -257 },
+  ],
+  authenticatorSelection: {
+    authenticatorAttachment: "platform",
+    residentKey: "required",
+    userVerification: "required",
+  },
+  timeout: 60_000,
+  attestation: "none",
+};
+
+export const opcoesLoginFixture: OpcoesWebauthn = {
+  challenge: "ZmFrZS1jaGFsbGVuZ2UtZGUtbG9naW4",
+  rpId: "habitos.exemplo.dev",
+  allowCredentials: [{ type: "public-key", id: "Y3JlZGVuY2lhbC1maXh0dXJl" }],
+  userVerification: "required",
+  timeout: 60_000,
+};
+
+export const biometriaResetadaFixture: BiometriaResetada = {
+  senhaProvisoria: "fixture-nao-use-isto",
+  sessoesRevogadas: 1,
+};
+
+export const registroRemovidoFixture: RegistroRemovido = {
+  efeitos: {
+    sequencia: { atual: 24, recorde: 25, totalNoPrazo: 24, desde: "2026-10-13" },
+    congelamentosDisponiveis: 3,
+    congelamentoEstornado: false,
+    periodoStatus: "aberto",
+    novoVencimento: null,
+  },
 };

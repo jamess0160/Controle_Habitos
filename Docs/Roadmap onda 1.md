@@ -121,10 +121,42 @@ Route handlers do App Router já com validação ligada e devolvendo **fixtures*
 | Registros | `POST /api/registros` · `DELETE /api/registros/:id` · `GET /api/habitos/:id/retroativo` · `POST /api/habitos/:id/retroativo` |
 | Infra | `POST\|DELETE /api/push/assinatura` · `POST /api/push/teste` · `GET\|PATCH /api/config` · `GET /api/exportar` |
 
-- [ ] stubs com validação de entrada ativa e fixture de saída
-- [ ] middleware de sessão (cookie httpOnly) e guarda "sem passkey ⇒ só a tela de biometria"
+- [x] stubs com validação de entrada ativa e fixture de saída
+- [x] middleware de sessão (cookie httpOnly) e guarda "sem passkey ⇒ só a tela de biometria"
 
 **Fechada quando** todo contrato existe em código, os stubs respondem fixtures válidas contra os próprios schemas, e um `GET /api/hoje` devolve o payload que o dashboard precisa.
+
+**Como ficou implementado**
+
+21 route handlers em `app/api/`, a plumbing em [servidor/](../servidor), a guarda em [proxy.ts](../proxy.ts). Todo handler tem a mesma cerimônia e nada mais:
+
+```ts
+const acesso = await exigirAcesso();
+if (!acesso.liberado) return acesso.resposta;
+
+const r = await corpo(req, criarHabito);
+if (!r.ok) return json(r.resposta, r.status);
+```
+
+- **`middleware.ts` não existe mais no Next 16** — a convenção virou `proxy.ts`, com o export `proxy`. Mesma função, outro nome.
+- **A guarda vale na API também, não só nas telas.** O proxy faz a verificação otimista do cookie (é o que a documentação do Next recomenda, e ele roda apartado do código de render); quem autoriza de verdade é `exigirAcesso()` em cada rota. Sem isso a guarda seria cosmética: um `fetch` operaria o app inteiro a partir da sessão provisória do primeiro acesso. Os dois casos têm códigos distintos — **401** manda ao login, **409** diz que a sessão existe mas falta cadastrar a biometria.
+- **`/api` fica fora do matcher do proxy de propósito.** Redirecionar uma chamada de API para `/login` devolveria HTML com status 200, e o `fetch` quebraria num erro de parse em vez de receber o 401 que sabe tratar.
+- **O nome do cookie e a leitura dele moram em [servidor/cookie-sessao.ts](../servidor/cookie-sessao.ts)**, um módulo puro sem imports — é o único jeito de o proxy e as rotas compartilharem isso sem o proxy arrastar `next/headers` para o bundle dele.
+- **O cookie de stub tem dois valores** (`stub-sem-passkey`, `stub-com-passkey`), e o fluxo inteiro anda: `POST /api/auth/senha` abre a sessão provisória, `POST /api/auth/webauthn/registro` a promove, o logout e o reset a encerram. A etapa 2 percorre primeiro acesso → biometria → dashboard sem banco nenhum. **Nada ali é segurança** — o valor do cookie é acreditado como vem, e a etapa 3.1 substitui por token opaco com hash no Postgres.
+- **`GET /api/auth/estado` é a única leitura que não devolve fixture**, porque é ela que diz à tela de login o que mostrar — um valor fixo tornaria o fluxo impossível de percorrer.
+- **JSON malformado é 422, não 500.** `corpo()` embrulha o `await req.json()`; sem isso um corpo truncado viraria exceção não tratada.
+- **Acréscimos ao contrato:** `registroRemovido` (o `DELETE /api/registros/:id` devolve os mesmos efeitos de uma marcação — apagar recalcula sequência, pode estornar congelamento e mover vencimento de `cada_n_dias`), e as fixtures de WebAuthn e de reset. Pausa e arquivamento devolvem o **hábito**, não `ok: true`, para a lista redesenhar a linha sem recarregar tudo.
+- **Convenção `_` registrada no ESLint.** Parâmetro posicional só existe para alcançar o seguinte: um handler que precisa do `ctx` é obrigado a declarar o `req` antes dele.
+
+**O que o stub achou na fixture do dashboard**
+
+Rodar o `GET /api/hoje` de verdade expôs três furos que o schema não pega, porque ele valida cada linha isolada e não tem como reclamar do caso difícil estar **ausente**:
+
+1. **Não havia linha de `duracao`.** O único hábito de duração era o 🧘 Meditar, que é a fixture do estado *pausado* — e pausado não rende interação devida. O dashboard seria desenhado sem a linha do cronômetro, que é a interação mais complicada da etapa 3.
+2. **O hábito fixo rendia uma linha só.** O payload é por interação devida, e era justamente o caso que faltava: agora o 💊 Vitamina D tem dois horários, com a dose da manhã cumprida e a da noite pendente — a distinção que o estado da ocorrência existe para permitir, e a prova de que a linha não pode ser indexada por `habitoId`.
+3. **A única linha de tipo negativo era de um hábito arquivado**, que não aparece no dashboard nem na lista ativa.
+
+Corrigido com dois hábitos ativos novos (🤸 Alongar, 🥤 Sem refrigerante) e seis testes que travam os invariantes: as quatro formas de progresso presentes, duas linhas por hábito fixo de dois horários com a mesma sequência, e nenhuma linha de hábito arquivado ou pausado.
 
 ---
 

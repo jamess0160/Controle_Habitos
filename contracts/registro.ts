@@ -126,3 +126,14 @@ export const retroativoAplicado = z.object({
   dias: z.array(diaRetroativo).length(7),
 });
 export type RetroativoAplicado = z.infer<typeof retroativoAplicado>;
+
+/**
+ * DELETE /api/registros/:id
+ *
+ * A desmarcação devolve os mesmos efeitos de uma marcação, não um `ok: true`:
+ * apagar um registro recalcula a sequência, pode estornar um congelamento e, em
+ * `cada_n_dias`, mover o vencimento. Sem o payload dizer, a tela teria de
+ * recarregar tudo para descobrir o que mudou.
+ */
+export const registroRemovido = z.object({ efeitos });
+export type RegistroRemovido = z.infer<typeof registroRemovido>;

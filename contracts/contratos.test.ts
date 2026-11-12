@@ -323,3 +323,52 @@ describe("auth", () => {
     expect(loginComSenha.safeParse({ senha: "x", usuario: "tiago" }).success).toBe(false);
   });
 });
+
+/**
+ * O schema valida cada linha isoladamente, então ele não tem como reclamar de
+ * uma fixture que simplesmente **não contém** o caso difícil. Estes testes são o
+ * que impede o dashboard de ser desenhado sobre um payload mais fácil do que o
+ * real — foi exatamente o que aconteceu: a primeira versão da fixture não tinha
+ * linha de `duracao`, dava uma linha só ao hábito de dois horários, e usava um
+ * hábito arquivado como a única linha de tipo negativo.
+ */
+describe("o dashboard carrega os casos difíceis", () => {
+  it("cobre as quatro formas de progresso", () => {
+    const tipos = new Set(f.hojeFixture.linhas.map((l) => l.progresso.tipo));
+    expect(tipos).toEqual(new Set(["binario", "quantificado", "duracao", "negativo"]));
+  });
+
+  it("o hábito fixo de dois horários rende duas linhas, uma por ocorrência", () => {
+    const doFixo = f.hojeFixture.linhas.filter((l) => l.habitoId === f.habitoVitamina.id);
+
+    expect(doFixo).toHaveLength(2);
+    expect(doFixo.map((l) => l.horario)).toEqual(["08:00:00", "20:00:00"]);
+    expect(new Set(doFixo.map((l) => l.ocorrenciaId)).size).toBe(2);
+    // Uma cumprida e uma pendente: é a distinção que o estado da ocorrência
+    // existe para permitir, e a linha não pode ser indexada por `habitoId`.
+    expect(doFixo.map((l) => l.concluida)).toEqual([true, false]);
+  });
+
+  it("a sequência é do hábito, então as duas linhas dele mostram a mesma", () => {
+    const doFixo = f.hojeFixture.linhas.filter((l) => l.habitoId === f.habitoVitamina.id);
+    expect(doFixo[0]?.sequencia).toBe(doFixo[1]?.sequencia);
+  });
+
+  it("não lista hábito arquivado nem pausado", () => {
+    const ids = f.hojeFixture.linhas.map((l) => l.habitoId);
+    expect(ids).not.toContain(f.habitoArquivado.id);
+    expect(ids).not.toContain(f.habitoPausado.id);
+  });
+
+  it("toda linha corresponde a um hábito ativo da lista", () => {
+    const ativos = new Set(f.listaDeHabitosFixture.habitos.map((h) => h.id));
+    for (const linha of f.hojeFixture.linhas) {
+      expect(ativos).toContain(linha.habitoId);
+    }
+  });
+
+  it("a lista separa arquivado de ativo", () => {
+    expect(f.listaDeHabitosFixture.habitos.every((h) => h.arquivadoEm === null)).toBe(true);
+    expect(f.listaDeHabitosFixture.arquivados.every((h) => h.arquivadoEm !== null)).toBe(true);
+  });
+});

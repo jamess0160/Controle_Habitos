@@ -25,8 +25,14 @@ import { Botao, CLASSE_ENTRADA } from "./ui";
  *
  * **O negativo é a exceção que o `concluida` não descreve bem.** Ele nasce
  * cumprido — "sem recaída" é o estado inicial —, então a marca já vem preenchida
- * e a ação continua disponível. Nos outros três, marca cheia significa que não há
- * mais o que fazer ali hoje.
+ * e a ação continua disponível.
+ *
+ * **Desfazer mora aqui, não só no retroativo.** Um toque por engano é o erro mais
+ * provável de toda a tela, e `linha.ultimoRegistro` existe para corrigi-lo no
+ * lugar: no `binario` a marca é alternância — toca e desmarca —, e nos outros
+ * três o desfazer aparece dentro do painel, junto da ação que o criou. Vale só
+ * para o último registro do dia; a janela de 7 dias continua sendo assunto do
+ * retroativo.
  */
 
 export type PedidoDeRegistro = { readonly valor?: number; readonly origem?: Origem };
@@ -35,26 +41,39 @@ type Props = {
   readonly linha: LinhaDeHoje;
   readonly ocupado: boolean;
   readonly aoRegistrar: (pedido: PedidoDeRegistro) => void;
+  readonly aoDesmarcar: () => void;
 };
 
-export function LinhaDeHojeItem({ linha, ocupado, aoRegistrar }: Props) {
+export function LinhaDeHojeItem({ linha, ocupado, aoRegistrar, aoDesmarcar }: Props) {
   const [painelAberto, setPainelAberto] = useState(false);
 
   const tipo = linha.progresso.tipo;
-  const negativo = tipo === "negativo";
-  /* No negativo a marca cheia não encerra a interação: a recaída ainda pode vir. */
-  const encerrada = linha.concluida && !negativo;
+  const podeDesfazer = linha.ultimoRegistro !== null;
+  /*
+   * A marca só fica inerte no caso em que nada pode acontecer: binário cumprido
+   * sem registro conhecido para desfazer. Nos demais ela sempre faz algo —
+   * marcar, desmarcar ou abrir o painel.
+   */
+  const inerte = tipo === "binario" && linha.concluida && !podeDesfazer;
   const fracao = fracaoDeProgresso(linha.progresso);
 
   function aoTocarNaMarca() {
-    if (encerrada) return;
-
     if (tipo === "binario") {
+      if (linha.concluida) {
+        if (podeDesfazer) aoDesmarcar();
+        return;
+      }
+
       aoRegistrar({});
       return;
     }
 
     setPainelAberto((aberto) => !aberto);
+  }
+
+  function desfazer() {
+    setPainelAberto(false);
+    aoDesmarcar();
   }
 
   function registrar(pedido: PedidoDeRegistro) {
@@ -71,28 +90,22 @@ export function LinhaDeHojeItem({ linha, ocupado, aoRegistrar }: Props) {
         <button
           type="button"
           onClick={aoTocarNaMarca}
-          disabled={ocupado || encerrada}
+          disabled={ocupado || inerte}
           /*
            * `size-11` é o alvo de toque (44 px) e a marca de 32 px mora dentro
            * dele: a área clicável não precisa ser do tamanho do desenho, e um
            * disco de 44 px dominaria a linha.
            */
           className="flex size-11 shrink-0 items-center justify-center rounded-full disabled:opacity-100"
-          aria-label={
-            encerrada
-              ? `${linha.nome}: cumprido`
-              : negativo
-                ? `Registrar recaída em ${linha.nome}`
-                : `Marcar ${linha.nome}`
-          }
+          aria-label={rotuloDaMarca(linha, podeDesfazer)}
         >
           <Marca estado={linha.concluida ? "cumprido" : "aberto"} cor={linha.cor} tamanho="toque" />
         </button>
 
         {/*
-          O corpo da linha abre o retroativo daquele hábito — é lá que mora a
-          correção, inclusive a de uma marcação feita por engano: a linha do
-          dashboard não carrega `registroId`, então não há como desmarcar daqui.
+          O corpo da linha abre o retroativo daquele hábito. Desfazer o toque de
+          hoje é aqui mesmo, na marca ou no painel; o retroativo é para o resto
+          da janela de 7 dias, que esta linha não enxerga.
         */}
         <Link
           href={`/habitos/${linha.habitoId}/retroativo`}
@@ -136,6 +149,10 @@ export function LinhaDeHojeItem({ linha, ocupado, aoRegistrar }: Props) {
               aoConfirmar={() => registrar({})}
             />
           )}
+
+          {podeDesfazer && (
+            <Desfazer linha={linha} ocupado={ocupado} aoDesmarcar={desfazer} />
+          )}
         </div>
       )}
 
@@ -153,6 +170,62 @@ export function LinhaDeHojeItem({ linha, ocupado, aoRegistrar }: Props) {
         </div>
       )}
     </li>
+  );
+}
+
+/**
+ * O que a marca faz, dito para quem não a vê.
+ *
+ * Importa porque o mesmo disco cheio significa duas coisas diferentes: no
+ * `binario` ele é um botão de desmarcar, e no `negativo` ele é o estado "sem
+ * recaída" com a ação de registrar uma. Um rótulo só para os dois mentiria para
+ * o leitor de tela.
+ */
+function rotuloDaMarca(linha: LinhaDeHoje, podeDesfazer: boolean): string {
+  if (linha.progresso.tipo === "negativo") return `Registrar recaída em ${linha.nome}`;
+
+  if (linha.progresso.tipo !== "binario") return `Registrar ${linha.nome}`;
+
+  if (!linha.concluida) return `Marcar ${linha.nome}`;
+
+  return podeDesfazer ? `Desmarcar ${linha.nome}` : `${linha.nome}: cumprido`;
+}
+
+/**
+ * Desfazer o último registro do dia, dentro do painel.
+ *
+ * Fica junto da ação que o criou, e não numa área de "histórico": o erro que ele
+ * conserta acabou de acontecer ali. O rótulo diz **quanto** vai voltar, porque
+ * desfazer 250 ml e desfazer 700 ml são decisões diferentes e o número está no
+ * payload — `linha.ultimoRegistro.valor`.
+ */
+function Desfazer({
+  linha,
+  ocupado,
+  aoDesmarcar,
+}: {
+  readonly linha: LinhaDeHoje;
+  readonly ocupado: boolean;
+  readonly aoDesmarcar: () => void;
+}) {
+  const registro = linha.ultimoRegistro;
+  if (registro === null) return null;
+
+  const rotulo =
+    linha.progresso.tipo === "quantificado"
+      ? `Desfazer os últimos ${numero(registro.valor)} ${linha.progresso.unidade}`
+      : linha.progresso.tipo === "duracao"
+        ? `Desfazer os últimos ${numero(registro.valor)} min`
+        : linha.progresso.tipo === "negativo"
+          ? "Desfazer a última recaída"
+          : "Desmarcar";
+
+  return (
+    <div className="mt-3 border-t border-linha pt-3">
+      <Botao variante="fantasma" largo disabled={ocupado} onClick={aoDesmarcar}>
+        {rotulo}
+      </Botao>
+    </div>
   );
 }
 

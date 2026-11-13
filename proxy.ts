@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { COOKIE_SESSAO, lerSessao } from "@/servidor/cookie-sessao";
+import { emDesenvolvimento } from "@/servidor/modo";
 
 /**
  * Guarda de navegação.
@@ -37,7 +38,24 @@ export function proxy(request: NextRequest) {
     return caminho === BIOMETRIA ? NextResponse.next() : paraOnde(request, BIOMETRIA);
   }
 
-  if (caminho === LOGIN || caminho === BIOMETRIA) {
+  if (caminho === LOGIN) {
+    return paraOnde(request, DASHBOARD);
+  }
+
+  /*
+   * Em desenvolvimento a senha abre uma sessão **completa** (ver
+   * [app/api/auth/senha](app/api/auth/senha/route.ts)), então sem esta exceção a
+   * tela de cadastro de biometria ficaria inalcançável na máquina de
+   * desenvolvimento — e é uma das sete telas que a etapa 2 existe para
+   * percorrer.
+   *
+   * Não é um furo na guarda: `/biometria` só **oferece** cadastrar uma passkey, e
+   * quem a cadastra é `POST /api/auth/webauthn/registro`, atrás de
+   * `exigirSessao()`. O que esta linha muda é conveniência de navegação, não
+   * autorização. Em produção o comportamento segue o do mapa — quem já tem
+   * passkey não volta para o pedágio.
+   */
+  if (caminho === BIOMETRIA && !emDesenvolvimento()) {
     return paraOnde(request, DASHBOARD);
   }
 

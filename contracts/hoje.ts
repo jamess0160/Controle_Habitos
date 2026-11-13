@@ -55,6 +55,24 @@ export const linhaDeHoje = z.object({
   ocorrenciaId: uuid.nullable(),
   horario: horario.nullable(),
   concluida: z.boolean(),
+  /**
+   * O último registro do dia lógico nesta interação — o que o dashboard desfaz.
+   *
+   * Acréscimo da etapa 2.4: sem ele, uma marcação por engano só se corrigia
+   * abrindo o retroativo do hábito, e `DELETE /api/registros/:id` precisa de um
+   * id que a linha não carregava.
+   *
+   * **Vai o último, não a lista toda, e com o `valor` dentro.** O id sozinho
+   * deixaria a tela sem saber *quanto* desfazer — apagar um incremento de 250 ml
+   * precisa subtrair 250, e só o servidor sabe quanto valia aquele registro.
+   * Mandar o valor aqui evita que a tela tenha de esperar a resposta do DELETE
+   * para redesenhar a linha.
+   *
+   * `null` quando não há nada a desfazer hoje nesta interação. Correção mais
+   * profunda que o último toque continua sendo trabalho do retroativo, que é
+   * onde a janela de 7 dias inteira está à vista.
+   */
+  ultimoRegistro: z.object({ id: uuid, valor: z.number() }).nullable(),
   progresso,
   /** 🔥 interações consecutivas no prazo deste hábito. */
   sequencia: z.int().min(0),

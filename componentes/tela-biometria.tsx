@@ -3,9 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { instalar, pedirPermissaoDeNotificacao, useConviteDeInstalacao, useSuportaWebauthn } from "@/cliente/ambiente";
-import { enviar, type Falha } from "@/cliente/api";
+import { enviar, useRecurso, type Falha } from "@/cliente/api";
 import { criarPasskey, mensagemDeErroWebauthn } from "@/cliente/webauthn";
-import type { Ok, OpcoesWebauthn, PasskeyCadastrada } from "@/contracts";
+import type { EstadoAuth, Ok, OpcoesWebauthn, PasskeyCadastrada } from "@/contracts";
 import { Botao, Nota } from "./ui";
 
 /**
@@ -14,6 +14,11 @@ import { Botao, Nota } from "./ui";
  * A sessão aberta pela senha **não dá acesso a mais nada**: a guarda do
  * [proxy](../proxy.ts) prende aqui, e `exigirAcesso()` responde 409 a qualquer
  * rota de domínio. Não existe caminho que deixe o app em uso com a senha ativa.
+ *
+ * Isso vale em produção. Com `APP_MODO=desenvolvimento` a senha abre uma sessão
+ * completa e esta tela deixa de ser pedágio — passa a ser uma tela que se visita
+ * por escolha, para exercitar o fluxo. É o único jeito de entrar num desktop sem
+ * autenticador, e está documentado em [servidor/modo.ts](../servidor/modo.ts).
  *
  * Três coisas acontecem ao concluir, e as três estão aqui de propósito: a senha
  * é desativada, a instalação da PWA é oferecida e a permissão de notificação é
@@ -25,12 +30,21 @@ import { Botao, Nota } from "./ui";
 
 type Passo = "explicando" | "pronto";
 
-const EM_DESENVOLVIMENTO = process.env.NODE_ENV !== "production";
-
 export function TelaBiometria() {
   const router = useRouter();
   const suporta = useSuportaWebauthn();
   const temConvite = useConviteDeInstalacao();
+
+  /*
+   * O modo do app vem do servidor, não de uma variável pública: a chave é
+   * `APP_MODO` e quem a lê é `GET /api/auth/estado` (ver
+   * [servidor/modo.ts](../servidor/modo.ts)). A tela **não** espera por essa
+   * resposta — o bloco de desenvolvimento aparece um instante depois, e segurar
+   * o cadastro de biometria atrás de uma segunda requisição seria pagar um
+   * carregamento por uma informação que só interessa a um botão de andaime.
+   */
+  const { recurso: auth } = useRecurso<EstadoAuth>("/api/auth/estado");
+  const desenvolvimento = auth.estado === "pronto" && auth.dados.modoDesenvolvimento;
 
   const [passo, setPasso] = useState<Passo>("explicando");
   const [passkey, setPasskey] = useState<PasskeyCadastrada | null>(null);
@@ -190,7 +204,7 @@ export function TelaBiometria() {
         </Nota>
       )}
 
-      {EM_DESENVOLVIMENTO && (
+      {desenvolvimento && (
         <div className="flex flex-col gap-2 border-t border-linha pt-4">
           <p className="text-[0.68rem] uppercase tracking-widest text-texto-fraco">
             Desenvolvimento

@@ -4,7 +4,14 @@ import Link from "next/link";
 import { useState } from "react";
 import { enviar, useRecurso, type Falha } from "@/cliente/api";
 import { dataCurta, dataLonga, SAUDACAO_TEXTO } from "@/cliente/formato";
-import type { Aviso, Hoje, LinhaDeHoje, Progresso, RegistroCriado } from "@/contracts";
+import type {
+  Aviso,
+  Hoje,
+  LinhaDeHoje,
+  RegistroCriado,
+  RegistroRemovido,
+} from "@/contracts";
+import { comRegistro, semRegistro } from "./efeitos-de-hoje";
 import { Carregando, Erro } from "./estado-da-tela";
 import { Mais } from "./icones";
 import { LinhaDeHojeItem, type PedidoDeRegistro } from "./linha-de-hoje";
@@ -56,7 +63,34 @@ export function TelaHoje() {
       return;
     }
 
-    definir(comEfeitos(hoje, linha, r.dados));
+    definir(comRegistro(hoje, linha, r.dados));
+  }
+
+  /**
+   * Desfaz o último registro do dia naquela interação.
+   *
+   * O `valor` sai de `linha.ultimoRegistro`, não da resposta: é o que permite a
+   * conta ser a inversa exata da marcação. A resposta traz os `efeitos`, que são
+   * a parte que só o servidor sabe — sequência recalculada e congelamento
+   * estornado.
+   */
+  async function desmarcar(linha: LinhaDeHoje) {
+    const registro = linha.ultimoRegistro;
+    if (registro === null) return;
+
+    setFalha(null);
+    setOcupado(true);
+
+    const r = await enviar<RegistroRemovido>(`/api/registros/${registro.id}`, "DELETE");
+
+    setOcupado(false);
+
+    if (!r.ok) {
+      setFalha(r.falha);
+      return;
+    }
+
+    definir(semRegistro(hoje, linha, registro, r.dados.efeitos));
   }
 
   const avisos = hoje.avisos.filter((a) => !avisosOcultos.includes(chaveDeAviso(a)));
@@ -102,6 +136,7 @@ export function TelaHoje() {
                 linha={linha}
                 ocupado={ocupado}
                 aoRegistrar={(pedido) => void registrar(linha, pedido)}
+                aoDesmarcar={() => void desmarcar(linha)}
               />
             ))}
           </ul>
@@ -205,53 +240,4 @@ function AvisoItem({
 
 function chaveDeAviso(aviso: Aviso): string {
   return `${aviso.tipo}:${aviso.habitoId}:${aviso.periodoFim}`;
-}
-
-// ─── Aplicação local dos efeitos ─────────────────────────────────────────────
-
-/**
- * Redesenha as linhas com o que o servidor devolveu.
- *
- * `RegistroCriado.efeitos` existe exatamente para isto: a sequência e o estoque
- * de congelamento são **do hábito**, então um registro muda as duas linhas de um
- * hábito fixo de dois horários, não só a tocada. Recarregar o payload inteiro
- * depois de cada toque jogaria fora o que o contrato se deu o trabalho de
- * mandar — e acrescentaria uma ida ao servidor entre o toque e a resposta visual.
- */
-function comEfeitos(hoje: Hoje, tocada: LinhaDeHoje, criado: RegistroCriado): Hoje {
-  return {
-    ...hoje,
-    linhas: hoje.linhas.map((linha) => {
-      if (linha.habitoId !== tocada.habitoId) return linha;
-
-      const progresso = avancar(linha.progresso, criado.valor);
-
-      return {
-        ...linha,
-        sequencia: criado.efeitos.sequencia.atual,
-        congelamentos: criado.efeitos.congelamentosDisponiveis,
-        progresso,
-        /*
-         * O negativo é avaliado no período inteiro, então a recaída muda todas as
-         * linhas do hábito. Nos outros tipos, só a ocorrência tocada é concluída.
-         */
-        concluida:
-          progresso.tipo === "negativo"
-            ? progresso.recaidas <= progresso.tolerancia
-            : linha.ocorrenciaId === tocada.ocorrenciaId || linha.concluida,
-      };
-    }),
-  };
-}
-
-function avancar(progresso: Progresso, valor: number): Progresso {
-  switch (progresso.tipo) {
-    case "binario":
-      return { ...progresso, concluidas: Math.min(progresso.meta, progresso.concluidas + 1) };
-    case "quantificado":
-    case "duracao":
-      return { ...progresso, acumulado: progresso.acumulado + valor };
-    case "negativo":
-      return { ...progresso, recaidas: progresso.recaidas + 1 };
-  }
 }

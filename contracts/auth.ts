@@ -26,6 +26,20 @@ export const estadoAuth = z.object({
   senhaAtiva: z.boolean(),
   /** Rate limiting em curso: instante em que o bloqueio termina. */
   bloqueadoAte: instante.nullable(),
+  /**
+   * `APP_MODO=desenvolvimento` no servidor.
+   *
+   * Está no payload — e não numa `NEXT_PUBLIC_*` lida pelo cliente — porque o
+   * modo é uma decisão do servidor e precisa ter **uma** fonte. Uma variável
+   * pública criaria uma segunda, capaz de divergir: a tela mostraria o
+   * formulário de senha enquanto a rota a recusasse, ou o contrário.
+   *
+   * O efeito visível é `senhaAtiva` continuar `true` depois da passkey
+   * cadastrada, o que em produção não acontece nunca. A tela de login usa isto
+   * para avisar, em letras visíveis, que o app está num modo em que a senha não
+   * foi desativada.
+   */
+  modoDesenvolvimento: z.boolean(),
 });
 export type EstadoAuth = z.infer<typeof estadoAuth>;
 

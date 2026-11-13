@@ -41,6 +41,8 @@ const ID = {
   ocorrenciaVitaminaManha: "5eed0003-0000-4000-8000-000000000001",
   ocorrenciaVitaminaNoite: "5eed0003-0000-4000-8000-000000000002",
   registro: "5eed0004-0000-4000-8000-000000000001",
+  registroAgua: "5eed0004-0000-4000-8000-000000000003",
+  registroVitamina: "5eed0004-0000-4000-8000-000000000004",
 } as const;
 
 export const habitoAgua: Habito = {
@@ -239,6 +241,7 @@ export const hojeFixture: Hoje = {
       ocorrenciaId: null,
       horario: null,
       concluida: false,
+      ultimoRegistro: { id: ID.registroAgua, valor: 250 },
       progresso: { tipo: "quantificado", acumulado: 1400, meta: 2000, unidade: "ml" },
       sequencia: 24,
       congelamentos: 3,
@@ -251,6 +254,7 @@ export const hojeFixture: Hoje = {
       ocorrenciaId: null,
       horario: null,
       concluida: false,
+      ultimoRegistro: null,
       progresso: { tipo: "binario", concluidas: 2, meta: 3 },
       sequencia: 3,
       congelamentos: 1,
@@ -266,6 +270,7 @@ export const hojeFixture: Hoje = {
       ocorrenciaId: ID.ocorrenciaVitaminaManha,
       horario: "08:00:00",
       concluida: true,
+      ultimoRegistro: { id: ID.registroVitamina, valor: 1 },
       progresso: { tipo: "binario", concluidas: 3, meta: 6 },
       sequencia: 9,
       congelamentos: 2,
@@ -278,6 +283,7 @@ export const hojeFixture: Hoje = {
       ocorrenciaId: ID.ocorrenciaVitaminaNoite,
       horario: "20:00:00",
       concluida: false,
+      ultimoRegistro: null,
       progresso: { tipo: "binario", concluidas: 3, meta: 6 },
       sequencia: 9,
       congelamentos: 2,
@@ -290,6 +296,7 @@ export const hojeFixture: Hoje = {
       ocorrenciaId: null,
       horario: null,
       concluida: false,
+      ultimoRegistro: null,
       progresso: { tipo: "duracao", acumulado: 0, meta: 15 },
       sequencia: 6,
       congelamentos: 1,
@@ -302,6 +309,7 @@ export const hojeFixture: Hoje = {
       ocorrenciaId: null,
       horario: null,
       concluida: true,
+      ultimoRegistro: null,
       progresso: { tipo: "negativo", recaidas: 0, tolerancia: 2 },
       sequencia: 2,
       congelamentos: 0,
@@ -432,11 +440,18 @@ export const retroativoPreviaFixture: RetroativoAplicado = {
   dias: retroativoFixture.dias,
 };
 
+/**
+ * Os três estados de autenticação retratam **produção**: `modoDesenvolvimento` é
+ * `false` nos três, porque o modo frouxo não é caso de referência de nada — ele
+ * existe para a máquina de desenvolvimento entrar sem autenticador, e tratá-lo
+ * como padrão nas fixtures espalharia o estado errado pelos testes.
+ */
 export const estadoAuthFixture: EstadoAuth = {
   autenticado: false,
   temPasskey: true,
   senhaAtiva: false,
   bloqueadoAte: null,
+  modoDesenvolvimento: false,
 };
 
 export const estadoAuthPrimeiroAcessoFixture: EstadoAuth = {
@@ -444,6 +459,7 @@ export const estadoAuthPrimeiroAcessoFixture: EstadoAuth = {
   temPasskey: false,
   senhaAtiva: true,
   bloqueadoAte: null,
+  modoDesenvolvimento: false,
 };
 
 export const estadoAuthBloqueadoFixture: EstadoAuth = {
@@ -451,6 +467,7 @@ export const estadoAuthBloqueadoFixture: EstadoAuth = {
   temPasskey: false,
   senhaAtiva: true,
   bloqueadoAte: "2026-11-10T15:35:00.000-03:00",
+  modoDesenvolvimento: false,
 };
 
 export const loginConcluidoFixture: LoginConcluido = {

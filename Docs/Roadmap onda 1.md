@@ -208,6 +208,31 @@ Mesmo tipo de achado da etapa 1.5, e pelo mesmo motivo: só construindo a tela s
 
 **O que ficou de fora de propósito:** o arraste para reordenar (persiste `habito.ordem`, é etapa 3.2) e a validação no aparelho, que depende de HTTPS com domínio estável — WebAuthn e PWA instalada não funcionam em `localhost` fora do desktop. Esse último item só fecha com o túnel da etapa 5, ou com um túnel temporário antes.
 
+### Revisão das pendências (etapa 2.4)
+
+Duas das três pendências abertas pelas telas foram decididas, e a terceira virou uma chave de ambiente.
+
+**1. Desmarcar no dashboard — feito.** Um toque por engano é o erro mais provável da tela, e mandar ao retroativo para consertá-lo é atrito demais. `linhaDeHoje` ganhou `ultimoRegistro: { id, valor } | null`: o último registro do dia lógico naquela interação. No `binario` a marca virou **alternância** — toca e desmarca; nos outros três o desfazer aparece **dentro do painel**, junto da ação que o criou, com o rótulo dizendo quanto volta ("Desfazer os últimos 250 ml").
+
+Vai o último registro e não a lista de ids, com o `valor` dentro, porque o id sozinho não diz *quanto* desfazer — e conhecer o valor antes de chamar o `DELETE` deixa a tela redesenhar a linha sem esperar a resposta, que carrega só os `efeitos`. A consequência aceita: há **um desfazer por carregamento**, já que a linha não sabe qual era o registro anterior ao último.
+
+A conta de marcar e desmarcar saiu do componente para [componentes/efeitos-de-hoje.ts](../componentes/efeitos-de-hoje.ts), sem React e com teste. O motivo é o mesmo do `rascunho-de-habito.ts`: uma conta errada ali mostra sequência, estoque de congelamento ou progresso **divergentes do servidor** sem nenhum sinal de falha. O teste central é o par — desfazer tem de ser a inversa exata de marcar.
+
+Escrever esse módulo achou um defeito do dashboard da etapa 2.3: `concluida` era marcado na primeira interação de **qualquer** tipo, então um incremento de 250 ml numa meta de 2000 desenhava disco cheio com 1750 faltando. A regra é por tipo, e agora mora numa função só (`concluidaDe`): `binario` olha se há registro na interação; `quantificado` e `duracao` olham o acumulado contra a meta; `negativo` olha a tolerância.
+
+**2. `de` obrigatório ao pausar — fica como está.** O campo visível com o palpite do aparelho resolve, e também documenta a virada das 04:00 para quem pausa de madrugada. Não vale uma mudança de contrato.
+
+**3. Os andaimes de dev viraram `APP_MODO`.** Eles estavam presos a `process.env.NODE_ENV`, que é decidido pelo comando (`next dev` contra `next build`) e não pelo operador — e a validação da etapa 2 no celular exige justamente um **build de produção servido por HTTPS**, onde `NODE_ENV` já é `production` enquanto o app ainda roda com fixtures. Sem chave separada não haveria como entrar ali.
+
+A chave está documentada no [Mapa de autenticação](mapas/Mapa%20de%20autentica%C3%A7%C3%A3o.md#ambiente-app_modo) e vale por uma diferença de comportamento, não só por esconder botões: em `desenvolvimento` a senha **continua ativa ao lado da passkey** e abre uma sessão completa; em `producao` ela é desativada no cadastro da biometria, como o mapa sempre disse. Quatro decisões a acompanham:
+
+- **falha fechada** — só a palavra exata `desenvolvimento` liga o modo frouxo; ausente, vazia ou escrita errado é produção;
+- **o cliente não decide** — o modo viaja em `estadoAuth.modoDesenvolvimento` e não numa `NEXT_PUBLIC_*`, para não existir uma segunda fonte capaz de divergir da rota;
+- **o aviso é visível** — a tela de login diz, em bloco próprio, que a senha continua ativa. A chave vazar para o deploy significa uma porta a mais para sempre, e isso não pode ser um estado silencioso;
+- **lido em tempo de execução** — verificado em build de produção: um bundle compilado com `desenvolvimento` e servido com `producao` se comporta como produção, no proxy inclusive. É o que permite a mesma imagem Docker rodar nos dois modos.
+
+O `/login?simular=…` sobreviveu, agora atrás da chave, porque o stub não tem como saber se existe passkey sem consultar o banco — e simular força `senhaAtiva: false`, já que é justamente o estado de produção que se quer olhar. O "pular a biometria" segue botão separado e visível. Os dois morrem na etapa 3.1.
+
 **Fechada quando** você navega o app inteiro no celular com dados falsos e aprova a estrutura.
 
 ---

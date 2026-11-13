@@ -91,6 +91,34 @@ A janela em que a senha está ativa é curta, mas é a única em que força brut
 
 O endpoint de autenticação WebAuthn não precisa do mesmo limite (não há segredo a adivinhar), mas a emissão de desafios vale limitar para não servir de torneira de escrita em `webauthn_desafio`.
 
+## Ambiente: `APP_MODO`
+
+A porta única tem uma consequência prática desconfortável: **num desktop sem autenticador não há como entrar**. Depois do cadastro da passkey a senha está desativada, e a passkey mora no celular. Isso é exatamente o que se quer em produção e é inviável para desenvolver.
+
+Daí a chave, lida em `servidor/modo.ts` e com dois valores:
+
+```
+APP_MODO=desenvolvimento   # a senha continua ativa AO LADO da passkey
+APP_MODO=producao          # a senha é desativada no cadastro da biometria
+```
+
+O que muda, e só isso muda:
+
+| | `producao` | `desenvolvimento` |
+|---|---|---|
+| `estado.senhaAtiva` depois da passkey | `false` | `true` |
+| Onde a senha leva | cadastro de biometria | dashboard, com sessão completa |
+| `/biometria` com sessão completa | redireciona ao dashboard | continua alcançável |
+| Login mostra | um caminho de entrada | os dois |
+
+Três decisões que acompanham a chave:
+
+1. **Falha fechada.** Só a palavra exata `desenvolvimento` liga o modo frouxo. Ausente, vazia ou escrita errado significa produção — o erro de digitação cai sempre para o lado seguro.
+2. **Não é `NODE_ENV`.** Uma chave de segurança não deve ser efeito colateral de qual script foi rodado, e a validação na PWA do celular exige build de produção servido por HTTPS enquanto o app ainda é ambiente de teste. Sem chave separada não haveria como entrar ali.
+3. **O cliente não decide.** O modo viaja em `estadoAuth.modoDesenvolvimento`, não numa `NEXT_PUBLIC_*`. Uma variável pública criaria uma segunda fonte, capaz de divergir: a tela mostraria o campo de senha enquanto a rota o recusasse.
+
+A mitigação do risco óbvio — a chave vazar para o deploy — é o aviso **visível** na tela de login dizendo que a senha continua ativa. Um app exposto na internet com uma porta a mais não pode ser um estado silencioso.
+
 ## Sessão
 
 Cookie `httpOnly`, `Secure`, `SameSite=Lax`, contendo um token opaco cujo **hash** é o que vive no banco. Validade longa (30 dias) com renovação por uso — é uso pessoal, e reautenticar por biometria é barato, mas não há motivo para expirar à toa. Revogação em massa acontece em todo reset e em todo cadastro de nova passkey.

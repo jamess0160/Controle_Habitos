@@ -102,8 +102,18 @@ function novoHabito() {
   return { nome: "💧 Água", cor: "ciano", config: f.habitoAgua.config };
 }
 
+/**
+ * `APP_MODO` é fixado em produção a cada teste.
+ *
+ * Não é cerimônia: `next/jest` carrega o `.env` do projeto, onde a chave vale
+ * `desenvolvimento` — sem este pino, a suíte inteira testaria o ambiente da
+ * máquina de quem roda, e o fluxo de primeiro acesso passaria ou falharia
+ * conforme o arquivo local. O comportamento de desenvolvimento tem seu próprio
+ * bloco, que liga a chave explicitamente.
+ */
 beforeEach(() => {
   jar.clear();
+  process.env.APP_MODO = "producao";
 });
 
 // ─── Cookie de sessão ────────────────────────────────────────────────────────
@@ -149,6 +159,19 @@ describe("proxy", () => {
     expect(destino(proxy(pagina("/login", "stub-com-passkey")))).toBe("/");
     expect(destino(proxy(pagina("/biometria", "stub-com-passkey")))).toBe("/");
     expect(redirecionou(proxy(pagina("/habitos", "stub-com-passkey")))).toBe(false);
+  });
+
+  it("em desenvolvimento o cadastro de biometria continua alcançável", () => {
+    /*
+     * Lá a senha abre sessão completa, então sem esta exceção a tela de
+     * biometria — uma das sete que a etapa 2 existe para percorrer — não teria
+     * como ser aberta. O login segue redirecionando: quem tem sessão está
+     * dentro.
+     */
+    process.env.APP_MODO = "desenvolvimento";
+
+    expect(redirecionou(proxy(pagina("/biometria", "stub-com-passkey")))).toBe(false);
+    expect(destino(proxy(pagina("/login", "stub-com-passkey")))).toBe("/");
   });
 
   it("cookie inválido é tratado como ausência de sessão", () => {
@@ -366,6 +389,30 @@ describe("o cookie percorre o fluxo de primeiro acesso", () => {
 
     await authLogout();
     expect(lerSessao(jar.get(COOKIE_SESSAO))).toBeNull();
+  });
+
+  it("em desenvolvimento a senha abre uma sessão completa e a mantém ativa", async () => {
+    /*
+     * O par que a chave existe para separar. Em produção a senha é um pedágio
+     * de uso único; em desenvolvimento ela é a porta de entrada do desktop sem
+     * autenticador, e continua valendo ao lado da passkey.
+     */
+    process.env.APP_MODO = "desenvolvimento";
+
+    const login = await authSenha(post({ senha: "qualquer" }));
+    expect(exigirValido(loginConcluido, await login.json(), "login").proximoPasso).toBe("dashboard");
+    expect(lerSessao(jar.get(COOKIE_SESSAO))?.temPasskey).toBe(true);
+
+    const estado = exigirValido(estadoAuth, await (await authEstado()).json(), "estado");
+    expect(estado).toMatchObject({
+      autenticado: true,
+      temPasskey: true,
+      senhaAtiva: true,
+      modoDesenvolvimento: true,
+    });
+
+    // E a sessão da senha já abre as rotas de domínio, sem passar pela biometria.
+    expect((await hojeGet()).status).toBe(200);
   });
 
   it("o reset de biometria derruba a própria sessão", async () => {

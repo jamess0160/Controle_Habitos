@@ -393,11 +393,32 @@ O log é o `stdout`: num contêiner do compose é o que `docker logs` guarda com
 **Fechada quando** os 10 casos de [reset.test.ts](../cli/reset.test.ts) passam. A casca interativa — `confirmar` e `imprimirSenha` — é verificada à mão: ela só lê do terminal e imprime, e um teste dela testaria o `readline`.
 
 ### 3.7 Testes (Jest)
-- [ ] configuração via `next/jest`
-- [ ] **unit**: núcleo de domínio com relógio injetado
-- [ ] **integração**: route handlers contra Postgres real de teste, migrations aplicadas, truncate entre casos
-- [ ] **componente**: telas com React Testing Library sobre os fixtures dos contratos
-- [ ] cenários obrigatórios: virada das 04:00, `cada_n_dias` re-encadeado, congelamento esgotado, pausa, senha desativada recusando login, bloqueio por tentativas
+- [x] configuração via `next/jest`
+- [x] **unit**: núcleo de domínio com relógio injetado
+- [x] **integração**: route handlers contra Postgres real de teste, migrations aplicadas, truncate entre casos
+- [x] **componente**: telas com React Testing Library sobre os fixtures dos contratos
+- [x] cenários obrigatórios: virada das 04:00, `cada_n_dias` re-encadeado, congelamento esgotado, pausa, senha desativada recusando login, bloqueio por tentativas
+
+**Os cenários obrigatórios, e onde cada um mora.** Espalhados junto do seu objeto em vez de reunidos num arquivo de "cenários": um teste longe do código que ele cobre é um teste que ninguém lê quando aquele código muda.
+
+| Cenário | Onde |
+|---|---|
+| Virada das 04:00 | [dia-logico.test.ts](../dominio/dia-logico.test.ts) (puro) e [registros.test.ts](../servidor/registros.test.ts) — marcação à 01:30 no dia anterior, às 04:30 no dia novo, e `criado_em` divergindo de `data_logica` |
+| `cada_n_dias` re-encadeado | [simulacao.test.ts](../dominio/simulacao.test.ts) e [retroativo.test.ts](../servidor/retroativo.test.ts) — a prévia promete o vencimento que a confirmação entrega |
+| Congelamento esgotado | [fechamento.test.ts](../servidor/fechamento.test.ts) — estoque vazio deixa falhar, sequência zera, recorde sobrevive |
+| Pausa | [habitos.test.ts](../servidor/habitos.test.ts), [retroativo.test.ts](../servidor/retroativo.test.ts) e [tique.test.ts](../worker/tique.test.ts) — inclusive a pausa **vencida**, que era o bug |
+| Senha desativada recusando login | [autenticacao.test.ts](../servidor/autenticacao.test.ts) — e com a **mesma** mensagem de senha errada, que é o ponto |
+| Bloqueio por tentativas | [autenticacao.test.ts](../servidor/autenticacao.test.ts) e [tela-login.test.tsx](../componentes/tela-login.test.tsx) — o servidor bloqueia, a tela esconde o formulário |
+
+**Os testes de componente mockam o `fetch`, não o `cliente/api.ts`.** Assim a tela é exercitada contra o cliente de verdade — o formato único de erro, o desvio de 401 para o login, o de 409 para a biometria. Mockar `api.ts` testaria a tela contra um dublê do contrato, que é o lugar onde ela mais pode divergir sem ninguém ver. E os dados saem dos **fixtures dos contratos**, não de objetos escritos à mão no teste: payload inventado envelhece em silêncio quando o contrato muda.
+
+**Três coisas que os testes de tela acharam**, e nenhuma delas estava no servidor:
+
+1. **o mock de `useRouter` devolvendo objeto novo a cada render** refazia o `GET` sem parar e atropelava a atualização otimista. O `useRouter` de verdade devolve referência estável; a lição é que `useRecurso` depende dessa estabilidade, e agora isso está dito onde se lê;
+2. **`pg` quebra em `jsdom`** (usa `TextEncoder`, que o jsdom não define), e `jest.setup.ts` o arrastava para dentro de todo teste de tela. As funções de URL do banco de teste saíram para `db/teste-url.ts`, sem driver — uma tela não tem nada que ver com o driver do Postgres;
+3. **o jsdom não implementa `PublicKeyCredential`**, então a tela de login caía sempre no ramo "sem suporte a biometria". Os dois ramos passaram a ser testados de propósito, e o de "sem suporte **com** senha ativa" não alarma — a CLI não é a única saída ali.
+
+**Fechada quando** `npx jest` passa com 26 arquivos e 556 casos, `npx tsc --noEmit` e `npm run lint` limpos, e `npm run build` compila. A suíte exige o `db:up` rodando e nada mais: cada worker cria e migra o próprio database.
 
 **Fechada quando** a suíte passa, nenhuma rota devolve fixture, e o fluxo completo roda contra o Postgres local.
 

@@ -13,5 +13,6 @@ export default criarConfig({
    */
   globalSetup: "<rootDir>/jest.globalSetup.ts",
   setupFiles: ["<rootDir>/jest.setup.ts"],
+  setupFilesAfterEnv: ["<rootDir>/jest.setupComponentes.ts"],
   collectCoverageFrom: ["dominio/**/*.ts", "!dominio/**/*.test.ts"],
 });

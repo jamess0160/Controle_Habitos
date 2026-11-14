@@ -9,9 +9,24 @@ npm run dev     # dev server (Turbopack) on http://localhost:3000
 npm run build   # production build
 npm run start   # serve the production build
 npm run lint    # eslint (flat config; takes no args by default)
+npm test        # jest (556 casos; exige o db:up rodando)
+
+npm run db:up        # sobe o Postgres de desenvolvimento (docker-compose.dev.yml)
+npm run db:migrate   # aplica as migrations pendentes
+npm run db:seed      # semeia config, senha e 6 hábitos com 30 dias de histórico
+npm run db:reset     # rollback total + migrate + seed
+npm run db:status    # o que já rodou e o que falta
+
+npm run worker       # o processo do tique de 1 minuto (etapa 3.5)
+npm run push:chaves  # gera um par VAPID e imprime para colar no .env
+
+npm run cli:reset-biometria  # apaga a passkey, gera senha provisória, revoga sessões
+npm run cli:reset-senha      # só uma senha provisória nova
 ```
 
-There is no test setup in this repo yet — no test runner, config, or test files. Add one before claiming tests exist.
+`npm test` exige o Postgres de desenvolvimento rodando e nada mais: cada worker do Jest cria e migra o próprio database (`controle_habito_test_<n>`). O SWC do `next/jest` transforma TypeScript **sem checar tipos**, então `npx tsc --noEmit` roda ao lado — e `npm run build` também, porque `cacheComponents` recusa ler `params` fora de `<Suspense>` e só o build diz isso.
+
+As duas CLIs de reset são destrutivas e exigem a palavra escrita (`RESETAR`, `GERAR`/`REATIVAR`). Sem terminal interativo elas recusam; `--sim` dispensa a confirmação e fica registrado no log.
 
 ## Read the bundled Next.js docs first
 
@@ -36,7 +51,7 @@ A personal habit tracker for a single user — no multi-tenancy, no signup, no `
 
 Authentication is a single gate: first access with user + password, then a WebAuthn passkey is registered and the password is deactivated. One device only; recovery is a CLI that resets the passkey directly in Postgres. The domain is part of the auth contract — the passkey's RP ID is the hostname, so changing it invalidates the biometric credential.
 
-**`APP_MODO` (`desenvolvimento` | `producao`) is the one switch that loosens that gate**, read in `servidor/modo.ts`. In `desenvolvimento` the password stays active alongside the passkey and opens a complete session — the only way into a desktop with no authenticator. It is **not** `NODE_ENV`: validating the PWA on the phone needs a production build over HTTPS while the app is still running on fixtures, so the two must be separable. It fails closed (only the exact word enables the loose mode, read at request time, not inlined at build), the client learns it from `estadoAuth.modoDesenvolvimento` rather than a `NEXT_PUBLIC_*` (one source, no divergence), and the login screen says so in a visible block — the key leaking into the deploy would mean an extra door, permanently.
+**`APP_MODO` (`desenvolvimento` | `producao`) is the one switch that loosens that gate**, read in `servidor/modo.ts`. In `desenvolvimento` the password stays active alongside the passkey and opens a complete session — the only way into a desktop with no authenticator. It is **not** `NODE_ENV`: a security key must not be a side effect of which npm script ran, and validating the PWA on the phone needs a production build over HTTPS from a machine that still has no authenticator — so the two must be separable. It fails closed (only the exact word enables the loose mode, read at request time, not inlined at build), the client learns it from `estadoAuth.modoDesenvolvimento` rather than a `NEXT_PUBLIC_*` (one source, no divergence), and the login screen says so in a visible block — the key leaking into the deploy would mean an extra door, permanently.
 
 UI language is pt-BR. The design docs are also in Portuguese, and the domain vocabulary (`habito`, `periodo`, `ocorrencia`, `congelamento`, `cadencia`) is Portuguese in the schema and code.
 
@@ -58,27 +73,65 @@ Four traps worth stating up front:
 - **`cada_n_dias` is anchored on the last completion**, so its periods cannot be pre-generated, its `fim` is mutable, and a retroactive edit re-chains every later period. The other cadences behave conventionally.
 - **Freezes are consumed automatically** when a period closes short of its goal. There is no `em_risco` state and no redemption deadline — the 7-day retroactive window is the only correction path.
 
-Schema is managed with **Knex** (migrations + seeds in `db/`), which is also the likely query layer. In development the Knex instance must be a `globalThis` singleton, or Next's hot reload will open a new pool per recompile and exhaust Postgres connections.
+Schema and queries both go through **Knex** (migrations + seeds in `db/`), with the table types in `db/tipos.ts` wired into `knex/types/tables`. In development the Knex instance must be a `globalThis` singleton, or Next's hot reload will open a new pool per recompile and exhaust Postgres connections. `next.config.ts` lists `knex` in `serverExternalPackages`: it resolves dialects with a dynamic require, and without that Turbopack tries to bundle `sqlite3`, `mysql2`, `oracledb` and `tedious`, failing the build. Joins are the one place the typed rows give up — `Knex.TableType` describes tables, not junctions, so a `join` types as `never` and the few queries that need one carry a hand-written row type with the reason written next to it.
 
 ## Current state
 
-Etapa 1 is done. In etapa 2, the palette, the PWA shell, the seven screens and the review of the pendências they opened are done; what remains is validating the installed PWA on the phone, which needs HTTPS on a stable domain (etapa 5's tunnel, or a temporary one).
+**Etapas 1, 2 e 3 estão completas.** Nada no app roda sobre fixture: toda rota de domínio fala com o Postgres. O que falta da onda 1 é a etapa 4 (validação no celular) e a 5 (deploy).
 
-What exists:
+Dois itens pendentes, os dois esperando HTTPS num domínio estável — o túnel da etapa 5, ou um temporário:
 
-- `db/` — 6 Knex migrations covering the whole schema, the `globalThis` pool singleton, `db/pg-types.ts` (parses Postgres `date` as a raw string so the driver can't shift a logical day), `db/cli.ts` (wraps the Knex API rather than the `knex` binary), `db/mapa-dominio.ts` (the only place the config table's nullables are faced), and a development seed with 6 habits over 30 days.
-- `dominio/` — the rule core. `dominio/simulacao.ts` **replays** a habit's whole history from the registros that exist now and returns periods, streak and freeze stock; the tables are the materialization of that result, not its source. Retroactive edits and `cada_n_dias` re-chaining fall out of the replay.
-- `contracts/` — Zod schemas for every route, with `cadencia`/`meta` as nested discriminated unions so invalid combinations don't compile, pt-BR error messages (Zod's `pt` locale is European Portuguese), `validar()` for route handlers, `contracts/fixtures.ts`, and `contracts/resumo.ts` — the **single** implementation of the habit's rule as a sentence, used by the form's preview now and by `habito.resumo` on the server in etapa 3.2.
-- `app/api/` — 21 route handlers, all **stubs**: real input validation, fixture output. Three of them deliberately don't return a raw fixture, because a canned value would make a screen look broken: `GET /api/auth/estado` computes from the session and the mode, and `POST /api/registros` / `PATCH /api/config` echo the identity of what was sent while keeping the *derived* parts (streak, freeze stock, period status) canned. `servidor/` has the plumbing (`exigirAcesso`, `corpo`, the session cookie, `modo.ts`) and `proxy.ts` the navigation guard. Nothing here touches the database yet, and the session cookie is a stub that believes its own value — etapa 3.1 replaces it.
-- `cliente/` — the mirror of `servidor/` on the browser side: `api.ts` (one error shape for every failure, network included, and the 401→`/login` / 409→`/biometria` redirect in one place), `formato.ts` (pt-BR formatting that never parses a logical day through `new Date(string)`), `relogio.ts`, `ambiente.ts`, `webauthn.ts`.
-- `componentes/` — the screens, as client components (`tela-*.tsx`), plus the shared pieces: `marca.tsx` (state is form, not colour), `ui.tsx` (touch targets decided in one place), and the two React-free, tested modules where a silent miscalculation would be worst: `rascunho-de-habito.ts` (the draft ⇆ config translation — a lossy round-trip would make editing a habit delete configuration) and `efeitos-de-hoje.ts` (the dashboard's optimistic mark/unmark — a wrong formula shows a streak that diverges from the server with no sign of failure).
-- `app/` — eight routes for the seven screens, in two groups: `(app)/` has the bottom bar, `(tela-cheia)/` doesn't (cadastro, edição and retroativo open over the navigation). `/login` and `/biometria` sit outside both. `app/manifest.ts`, `app/tema.ts` and `public/sw.js` are the PWA shell.
+- validar a PWA **instalada** no celular (último item da etapa 2);
+- provar o push chegando com o app fechado (etapa 4). O caminho inteiro está de pé e testado; o que não se prova em `localhost` é a entrega real.
 
-Two etapa-2 scaffolds, now gated by `APP_MODO=desenvolvimento` instead of `NODE_ENV`, to delete in etapa 3.1: `/login?simular=…` (three of the four login states can't be reached while the stub can't know whether a passkey exists; simulating forces `senhaAtiva: false`, since the point is to look at the production state) and the "pular a biometria (dev)" button — a separate, visible button rather than a `catch` that fakes success, because the fixtures' WebAuthn challenge is invented and a real `credentials.create()` must fail.
+### A arquitetura que a etapa 3 fixou
 
-Two more traps the screens found, worth knowing before touching the dashboard:
+**Materialização é replay, não acumulação.** `habito_periodo`, `habito_ocorrencia`, `congelamento` e `habito_streak` **não são fonte de verdade** — são `simular()` gravado para ser lido rápido. A fonte são `habito_config` (versionada), `registro` e a pausa. `servidor/materializar.ts` reescreve tudo a partir dos registros que existem agora, dentro de uma transação.
 
-- **A dashboard line's `concluida` follows a per-type rule**, in `concluidaDe`: `binario` asks whether the interaction has a registro today, `quantificado`/`duracao` compare accumulated against the meta, `negativo` checks the tolerance. Treating the first interaction as completion drew a full disc with 1750 ml still missing.
-- **The dashboard's unmark needs the registro's `valor` before deleting**, which is why `linhaDeHoje.ultimoRegistro` carries `{ id, valor }` and not just an id: `DELETE /api/registros/:id` returns only `efeitos`, so the screen could not otherwise know how much to subtract.
+Isso torna um conjunto grande de operações a **mesma** operação: criar, editar, pausar, retomar, arquivar, marcar, desmarcar, preencher retroativamente e virar o dia são todas "mudou a entrada, replay". O re-encadeamento de `cada_n_dias` e o estorno de congelamento caem de graça em vez de serem conserto caso a caso.
 
-Tests run with `npm test` (Jest 30 via `next/jest`). The SWC transform strips types without checking them, so run `npx tsc --noEmit` alongside. Note that `next/jest` loads `.env`, so anything reading `APP_MODO` must pin it in the test rather than inherit the local file — `servidor/rotas.test.ts` does it in a `beforeEach`. `npm run build` is worth running too: `cacheComponents` rejects reading `params` or `useParams` outside `<Suspense>`, and only the build says so.
+Três consequências que não são óbvias e que o código documenta no lugar:
+
+- **`registro.periodo_id` é `NOT NULL ON DELETE CASCADE`**, então apagar períodos para recalculá-los levaria os registros junto. Eles são lidos antes e reinseridos **com os mesmos ids** — `ultimoRegistro.id` e `registroIds` viajam até a tela, e um id que muda transformaria o desfazer em 404.
+- **Idempotência não é opcional.** O worker re-materializa na virada de cada dia e o usuário a cada marcação; um replay que não fosse idempotente faria o estoque de congelamento crescer a cada tique. Tem teste (`servidor/fechamento.test.ts`).
+- **Chave de evento, nunca de linha.** `notificacao_enviada.referencia` descreve `<habito>|<dia>|<momento>` em texto, porque períodos e ocorrências trocam de id a cada replay: uma chave de id faria o lembrete já enviado ser reenviado a cada minuto.
+
+### O que existe
+
+- `db/` — 8 migrations. A `0007` removeu `congelamento.estornado_em` (estorno é a diferença entre dois recálculos, não um evento numa linha) e a `0008` trocou `notificacao_enviada.referencia_id` por `referencia` em texto. `db/teste.ts` cria **um database por worker** do Jest; `db/teste-url.ts` calcula a URL sem arrastar o driver, porque `pg` quebra em `jsdom`.
+- `dominio/` — o núcleo puro, com relógio injetado. `simulacao.ts` é o replay.
+- `contracts/` — Zod como fonte única, com `cadencia`/`meta` em uniões discriminadas aninhadas. `contracts/resumo.ts` é a **única** implementação da regra do hábito como frase.
+- `servidor/` — autenticação (Argon2id, sessão de token opaco com SHA-256 no banco, rate limiting em tabela por `CF-Connecting-IP`, WebAuthn com trava de `rp_id`), hábitos, dashboard, registro, retroativo, push e o relógio lógico. `relogio.ts` tem o único `horaDeParede` do projeto.
+- `worker/` — processo separado (`npm run worker`), tique de 1 minuto: virada do dia, notificações e limpeza, cada etapa capturada em separado para que uma falha de rede não impeça o fechamento. **Não sabe fechar período** — fechar é re-materializar.
+- `cli/` — `push:chaves` (gera o par VAPID e imprime para colar à mão), `cli:reset-biometria` e `cli:reset-senha`. As duas últimas são transacionais e exigem a palavra escrita, não `s/n`.
+- `cliente/` — o espelho de `servidor/` no navegador: `api.ts` (um formato de erro para toda falha, rede incluída, e o desvio 401→`/login` / 409→`/biometria` num lugar só), `push.ts`, `webauthn.ts`, `formato.ts`.
+- `componentes/` — as sete telas, mais os módulos React-free e testados onde um erro de conta seria silencioso: `rascunho-de-habito.ts` e `efeitos-de-hoje.ts`.
+- `public/sw.js` — service worker com `push` e `notificationclick`.
+
+### Duas horas de notificação decididas na 3.5
+
+Não estavam no mapa de regras, e estão em `worker/notificacoes.ts`:
+
+- `congelamento_usado` e `sequencia_perdida` nascem na virada das **04:00** e esperam as **08:00** para serem entregues. Acordar alguém às quatro para contar que a sequência acabou é o oposto do que o aviso serve, e o dashboard mostra os mesmos dois por dois dias.
+- `meta_atraso` cai às **20:00** quando o hábito não tem `notificar_em` — é o único aviso antes de perder o período e não podia depender de um campo opcional. No último dia ele **substitui** o lembrete: duas notificações do mesmo hábito no mesmo minuto treinam a pessoa a ignorar as duas.
+
+### Testes
+
+`npm test` roda 556 casos em 26 arquivos (Jest 30 via `next/jest`). Exige o `db:up` rodando e nada mais — cada worker cria e migra o próprio database.
+
+Quatro coisas que valem saber antes de escrever um teste aqui:
+
+- **O SWC transforma sem checar tipos**, então rode `npx tsc --noEmit` ao lado. E `npm run build` também: `cacheComponents` recusa ler `params` fora de `<Suspense>`, e só o build diz isso.
+- **`next/jest` carrega o `.env`**, então quem lê `APP_MODO` tem de pinar o valor no teste. `jest.setup.ts` fixa `producao`.
+- **`jest.useFakeTimers` só pode falsear `Date`** (`doNotFake` para o resto): o driver do Postgres usa `setTimeout` internamente, e congelá-lo faz a consulta nunca voltar.
+- **Nos testes de tela, o mock de `useRouter` precisa devolver referência estável.** `useRecurso` tem `router` entre as dependências do efeito que busca; um objeto novo a cada render refaz o `GET` sem parar e atropela a atualização otimista.
+
+### Armadilhas que já morderam
+
+Além das quatro do topo deste arquivo, estas apareceram em uso e têm teste:
+
+- **Período que cobre hoje ≠ período aberto.** Cumprir a meta de um hábito diário **fecha** o período de hoje; o próximo só começa amanhã. Buscar `status = 'aberto'` fazia o hábito desaparecer do dashboard no instante em que era marcado.
+- **Pausa vencida não é "está pausado".** `pausado_de`/`pausado_ate` guardam o intervalo e não são limpos quando a pausa expira sozinha. A condição `pausado_de IS NOT NULL` fazia um hábito que voltou de férias nunca mais materializar — sumia do dashboard no dia seguinte, sem erro em lugar nenhum.
+- **Duas escalas de progresso.** `binario` e `negativo` mostram o **período**; `quantificado` e `duracao` mostram a **interação de hoje**. Somar o incremento nas duas linhas de um hábito fixo mostraria 700 ml em cada dose quando foram 700 numa.
+- **`novoVencimento` vem preenchido em toda resposta de hábito ancorado**, não só quando a âncora se move. A tela compara com o `periodoAtual.fim` que já tem, senão pede confirmação de uma mudança que não houve — e um aviso que aparece sempre deixa de ser aviso.
+- **`web-push` fica no 3.x.** O 4.0 é só-ESM e não publica tipos, enquanto `@types/web-push` descreve o 3.x com default export: a combinação compila e quebra em execução.

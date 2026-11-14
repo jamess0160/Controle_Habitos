@@ -5,11 +5,12 @@
  * perceba: a resposta não bate com o schema do contrato, o portão não fecha, a
  * validação de entrada não está ligada.
  *
- * As rotas de domínio ainda devolvem fixture — a implementação delas é 3.2 a
- * 3.4 —, e é justamente por isso que a conformidade com o contrato vale: é o que
- * garante que a tela construída em cima do stub continue valendo quando o stub
- * sair. A autenticação, já real, tem suíte própria em
- * [autenticacao.test.ts](autenticacao.test.ts).
+ * Hábitos (3.2) e autenticação (3.1) já são reais e têm suíte própria —
+ * [habitos.test.ts](habitos.test.ts) e [autenticacao.test.ts](autenticacao.test.ts).
+ * O que sobra de fixture aqui é o dashboard, o registro, o retroativo, o push e
+ * a exportação, que são as etapas 3.3 a 3.5; para essas, a conformidade com o
+ * contrato é o que garante que a tela construída em cima do stub continue
+ * valendo quando o stub sair.
  */
 
 import { readFileSync } from "node:fs";
@@ -38,6 +39,7 @@ const { jar } = jest.requireMock<{ jar: Map<string, string> }>("next/headers");
 
 import {
   configApp,
+  criarHabito,
   estadoAuth,
   exigirValido,
   exportacao,
@@ -62,6 +64,7 @@ import {
   semearPasskey,
 } from "./apoio-de-teste";
 import { COOKIE_SESSAO } from "./cookie-sessao";
+import { criarHabitoNoBanco } from "./habitos";
 
 import { GET as authEstado } from "@/app/api/auth/estado/route";
 import { POST as authRegistroOpcoes } from "@/app/api/auth/webauthn/registro/opcoes/route";
@@ -83,7 +86,26 @@ import { DELETE as registroDelete } from "@/app/api/registros/[id]/route";
 
 // ─── Utilidades ──────────────────────────────────────────────────────────────
 
+/**
+ * Id de um hábito que **não existe**, para os casos de 404 e para o portão.
+ *
+ * As rotas de hábito consultam o banco desde a 3.2, então o id de uma fixture
+ * não serve mais como "um hábito qualquer": ele serve como "um hábito ausente".
+ * Quem precisa de hábito existente chama `comHabito()`.
+ */
 const ID = f.habitoAgua.id;
+
+/** Cria um hábito de verdade e devolve o id. */
+async function comHabito(): Promise<string> {
+  const habito = await criarHabitoNoBanco(
+    exigirValido(
+      criarHabito,
+      { nome: f.habitoAgua.nome, cor: f.habitoAgua.cor, config: f.habitoAgua.config },
+      "hábito de teste",
+    ),
+  );
+  return habito.id;
+}
 
 /**
  * Autentica de verdade: grava a sessão (e a passkey, quando pedida) no banco.
@@ -113,6 +135,15 @@ function pagina(caminho: string, cookie?: string): NextRequest {
 }
 
 const ctxId = { params: Promise.resolve({ id: ID }) };
+
+function ctxDe(id: string) {
+  return { params: Promise.resolve({ id }) };
+}
+
+/** Hoje pelo relógio do servidor — a pausa exige dia lógico, não `new Date()`. */
+function hojeDeTeste(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
 /* Dicas de cookie para os testes do proxy, que não tocam o banco. */
 const PROVISORIA = "token-de-teste.provisoria";
@@ -243,19 +274,30 @@ describe("portão", () => {
 describe("todo stub responde o que o contrato promete", () => {
   beforeEach(async () => autenticar(true));
 
-  const casos: Array<[string, Parameters<typeof exigirValido>[0], () => Promise<Response>]> = [
+  /*
+   * Os casos que operam **um** hábito recebem o id por parâmetro: desde a 3.2 as
+   * rotas de hábito consultam o banco, e um id de fixture agora responde 404 —
+   * corretamente.
+   */
+  const casos: Array<
+    [string, Parameters<typeof exigirValido>[0], (id: string) => Promise<Response>]
+  > = [
     ["GET /api/hoje", hoje, () => hojeGet()],
     ["GET /api/habitos", listaDeHabitos, () => habitosGet()],
     ["POST /api/habitos", habito, () => habitosPost(post(novoHabito()))],
-    ["GET /api/habitos/:id", habito, () => habitoGet(post({}), ctxId)],
-    ["PATCH /api/habitos/:id", habito, () => habitoPatch(post({ nome: "💧 Filtrada" }), ctxId)],
-    ["PUT /api/habitos/ordem", listaDeHabitos, () => habitosOrdem(post({ ordem: [ID] }))],
+    ["GET /api/habitos/:id", habito, (id) => habitoGet(post({}), ctxDe(id))],
+    [
+      "PATCH /api/habitos/:id",
+      habito,
+      (id) => habitoPatch(post({ nome: "💧 Filtrada" }), ctxDe(id)),
+    ],
+    ["PUT /api/habitos/ordem", listaDeHabitos, (id) => habitosOrdem(post({ ordem: [id] }))],
     [
       "POST /api/habitos/:id/pausa",
       habito,
-      () => pausaPost(post({ de: "2026-11-11", ate: null }), ctxId),
+      (id) => pausaPost(post({ de: hojeDeTeste(), ate: null }), ctxDe(id)),
     ],
-    ["POST /api/habitos/:id/arquivo", habito, () => arquivoPost(post({}), ctxId)],
+    ["POST /api/habitos/:id/arquivo", habito, (id) => arquivoPost(post({}), ctxDe(id))],
     ["GET /api/habitos/:id/retroativo", retroativo, () => retroativoGet(post({}), ctxId)],
     [
       "POST /api/habitos/:id/retroativo",
@@ -282,7 +324,7 @@ describe("todo stub responde o que o contrato promete", () => {
   ];
 
   it.each(casos)("%s", async (nome, schema, chamar) => {
-    const res = await chamar();
+    const res = await chamar(await comHabito());
     expect(res.status).toBeLessThan(300);
     exigirValido(schema, await res.json(), nome);
   });
@@ -347,6 +389,13 @@ describe("validação ligada nas rotas que escrevem", () => {
   });
 
   it("PATCH não aceita meta de outro tipo — o tipo do hábito é imutável", async () => {
+    /*
+     * O tipo vem do **banco**, não do payload: a rota carrega o hábito, monta
+     * `editarHabito(tipo)` com o tipo gravado e aí valida. O 422 é do contrato,
+     * antes de a FK composta `(habito_id, tipo)` ter chance de reclamar.
+     */
+    const id = await comHabito();
+
     const res = await habitoPatch(
       post({
         config: {
@@ -358,10 +407,17 @@ describe("validação ligada nas rotas que escrevem", () => {
           congelamento: null,
         },
       }),
-      ctxId,
+      ctxDe(id),
     );
 
     expect(res.status).toBe(422);
+  });
+
+  it("hábito inexistente é 404, não 500", async () => {
+    const res = await habitoGet(post({}), ctxId);
+    expect(res.status).toBe(404);
+    const corpo: RespostaErro = await res.json();
+    expect(corpo.erro.codigo).toBe("nao_encontrado");
   });
 
   it("a prévia do retroativo não persiste, e a confirmação persiste", async () => {

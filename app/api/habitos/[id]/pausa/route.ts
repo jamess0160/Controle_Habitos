@@ -1,6 +1,6 @@
 import { pausarHabito } from "@/contracts";
-import { habitoAgua, habitoPausado } from "@/contracts/fixtures";
-import { corpo, exigirAcesso, json } from "@/servidor/http";
+import { corpo, exigirAcesso, falha, json } from "@/servidor/http";
+import { pausarHabitoNoBanco, retomarHabitoNoBanco } from "@/servidor/habitos";
 
 /**
  * POST e DELETE da pausa.
@@ -11,21 +11,34 @@ import { corpo, exigirAcesso, json } from "@/servidor/http";
  *
  * As duas respostas devolvem o **hábito** e não `ok: true`: a lista precisa
  * redesenhar a linha com o estado novo, e um `ok` a obrigaria a recarregar tudo.
+ *
+ * Pausar re-materializa, e tem de re-materializar: os períodos do intervalo
+ * deixam de existir, e a sequência exibida mudaria sem isso.
  */
-export async function POST(req: Request, _ctx: RouteContext<"/api/habitos/[id]/pausa">) {
+export async function POST(req: Request, ctx: RouteContext<"/api/habitos/[id]/pausa">) {
   const acesso = await exigirAcesso();
   if (!acesso.liberado) return acesso.resposta;
 
   const r = await corpo(req, pausarHabito);
   if (!r.ok) return json(r.resposta, r.status);
 
-  return json(habitoPausado);
+  const { id } = await ctx.params;
+  const habito = await pausarHabitoNoBanco(id, r.dados);
+
+  if (habito === null) return falha("nao_encontrado", "Hábito não encontrado.");
+
+  return json(habito);
 }
 
 /** DELETE /api/habitos/:id/pausa — retomar antes da data marcada. */
-export async function DELETE(_req: Request, _ctx: RouteContext<"/api/habitos/[id]/pausa">) {
+export async function DELETE(_req: Request, ctx: RouteContext<"/api/habitos/[id]/pausa">) {
   const acesso = await exigirAcesso();
   if (!acesso.liberado) return acesso.resposta;
 
-  return json(habitoAgua);
+  const { id } = await ctx.params;
+  const habito = await retomarHabitoNoBanco(id);
+
+  if (habito === null) return falha("nao_encontrado", "Hábito não encontrado.");
+
+  return json(habito);
 }

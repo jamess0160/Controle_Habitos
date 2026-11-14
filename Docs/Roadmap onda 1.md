@@ -275,10 +275,32 @@ Decisões que o código tomou e vale registrar:
 **Pendente da 3.1 que é de outra sub-etapa:** as mensagens de recuperação citam `npm run cli:reset-biometria` e `cli:reset-senha`, que chegam na 3.6.
 
 ### 3.2 Hábitos
-- [ ] CRUD com **versionamento** de `habito_config` (nunca UPDATE)
-- [ ] formulário validando com o mesmo schema do contrato, sem lógica espelhada no cliente
-- [ ] pausa agendada e aberta, arquivar e desarquivar
-- [ ] reordenação por arraste persistindo `habito.ordem`
+- [x] CRUD com **versionamento** de `habito_config` (nunca UPDATE)
+- [x] formulário validando com o mesmo schema do contrato, sem lógica espelhada no cliente
+- [x] pausa agendada e aberta, arquivar e desarquivar
+- [x] reordenação por arraste persistindo `habito.ordem`
+
+**A peça que apareceu aqui e serve até a 3.4: `servidor/materializar.ts`.**
+
+`habito_periodo`, `habito_ocorrencia`, `congelamento` e `habito_streak` não são fonte de verdade — são `simular()` gravado para poder ser lido rápido. A fonte são `habito_config`, `registro` e a pausa. Isso transforma um conjunto grande de operações numa só: criar, editar, pausar, retomar, arquivar, marcar, desmarcar e preencher retroativamente são todas "mudou a entrada, replay". O re-encadeamento de `cada_n_dias` e o estorno de congelamento caem de graça, em vez de serem conserto incremental caso a caso — que é justamente onde esse tipo de código erra.
+
+O algoritmo é o do seed de desenvolvimento, extraído. Toda escrita de hábito termina em `materializar()` **dentro da mesma transação**: deixar para depois abriria uma janela em que a sequência exibida não corresponde à configuração gravada.
+
+**O detalhe que quase apagou dados.** `registro.periodo_id` é `NOT NULL` com `ON DELETE CASCADE` para `habito_periodo`. Apagar os períodos para recalculá-los apagaria os registros junto — a fonte de verdade iria embora com a materialização. Então os registros são lidos antes, os períodos apagados, e os registros reinseridos **com os mesmos ids**. Preservar o id não é zelo: `linhaDeHoje.ultimoRegistro.id` e `diaRetroativo.registroIds` viajam até a tela, e um id que muda a cada materialização transformaria o botão de desfazer em 404. Há uma conferência no fim que falha alto se algum registro não voltar a cair em período nenhum — o caso típico é marcação dentro de uma pausa, que seria descartada em silêncio.
+
+**O versionamento, e a única exceção ao "nunca UPDATE".** Editar fecha a versão vigente em **ontem** e abre a próxima a partir de hoje, de modo que as faixas não se sobrepõem — que é o que `configVigenteEm` assume. Mas uma versão criada **hoje** não governou período fechado nenhum: fechá-la em ontem daria `vigente_ate < vigente_de` e o CHECK recusaria; abrir a nova na mesma data daria faixas sobrepostas e `configVigenteEm` escolheria a mais antiga. Nesse caso — e só nele — a versão vigente é atualizada no lugar. O ganho não é só evitar o conflito: uma tarde ajustando a meta de um hábito novo deixaria uma dúzia de versões sem nenhum período fechado para explicá-las.
+
+Conferido contra o banco: versão 1 fechada em 13/11, versão 2 aberta em 14/11, e o período que começou no dia 8 **mantendo** `meta_ocorrencias: 5` depois de a regra virar 2. É a armadilha nº 2 do projeto, e é a parte que erra em silêncio — uma régua nova sobre período antigo transforma semana cumprida em semana falhada, e a sequência muda sozinha.
+
+**O tipo é imutável, e o 422 vem do contrato.** A rota carrega o hábito, lê o `tipo` gravado e monta `editarHabito(tipo)` com ele. Custa uma consulta antes de validar e é o que faz o erro ser honesto: um PATCH de `duracao` num hábito `quantificado` volta com `config.meta.tipo` apontado, em vez de uma violação da FK composta `(habito_id, tipo)` como 500. O repositório ganhou a mesma guarda, porque é exportado e um chamador novo não teria esse cuidado — foi o próprio teste que provocou isso, criando um hábito quantificado e editando com meta binária.
+
+**O arraste usa Pointer Events, não a API de arrastar do HTML5.** `draggable` não dispara em toque no iOS nem no Android, e este app é usado no celular — seria um recurso só de desktop. O ponteiro atende dedo, mouse e caneta com o mesmo código. A alça tem `touch-action: none` e só ela: arrastar pela alça não rola a página e o resto da linha continua rolável; aplicar na linha inteira travaria a rolagem da tela. Para quem não arrasta, os botões ↑/↓ da alça chamam a mesma função — e a alça em si é `aria-hidden`, porque um controle de arraste anunciado ao leitor de tela seria um controle sem como ser operado.
+
+A conta de reordenar ficou pura e testada ([componentes/reordenar.ts](../componentes/reordenar.ts)), pelo motivo de sempre: um deslocamento de um índice embaralha a lista do usuário de um jeito que parece intencional. Dois detalhes que o teste fixa: `mover` **atravessa** os vizinhos em vez de trocar de lugar com o destino (trocar deixaria a lista em outra ordem que a vista durante o gesto), e `indiceSobre` compara contra o **meio** de cada linha, não contra a borda — pela borda, a troca move a própria linha sob o dedo e o item oscila a cada quadro.
+
+Durante o arraste a lista do recurso não é tocada: um `definir()` por quadro remontaria o componente e perderia a captura do ponteiro no meio do movimento. O `PUT` acontece uma vez, no `pointerup`, e só se a ordem mudou.
+
+**O item do formulário já estava feito** desde a etapa 2.3 — ele valida com `validar(criarHabito, …)`, o mesmo schema da rota, e usa `campos[].campo` para pular ao passo do campo errado. A 3.2 não mexeu nele; a caixa estava aberta porque a rota do outro lado era stub.
 
 ### 3.3 Registro e dashboard
 - [ ] `GET /api/hoje` real, uma linha por interação devida

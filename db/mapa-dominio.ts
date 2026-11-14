@@ -2,7 +2,8 @@ import { type DataLogica, comoDataLogica } from "../dominio/calendario";
 import type { Meta, Modo } from "../dominio/meta";
 import type { Cadencia, ModoFixo } from "../dominio/periodo";
 import type { VersaoConfig } from "../dominio/simulacao";
-import type { HabitoConfig } from "./tipos";
+import type { ConfigHabito as ConfigDoContrato } from "../contracts";
+import type { HabitoConfig, HabitoConfigInsert } from "./tipos";
 
 /**
  * Tradução da linha do banco para a forma que o domínio consome.
@@ -118,3 +119,147 @@ export function instanteDe(data: DataLogica, hora: string): Date {
 }
 
 export { comoDataLogica };
+
+// ─── O caminho de volta: contrato → linha ────────────────────────────────────
+
+/**
+ * Traduz a configuração do contrato para a linha de `habito_config`.
+ *
+ * É o inverso de `versaoDeConfig`, e mora no mesmo arquivo de propósito: as duas
+ * direções têm de concordar sobre qual campo é nulo em qual variante, e separá-las
+ * em módulos distintos seria convidar a divergência. Aqui é onde a união
+ * discriminada do contrato volta a ser a tabela larga.
+ *
+ * Todos os nullables aparecem **explícitos**, mesmo os nulos: omitir um campo e
+ * confiar no default da coluna esconderia a decisão, e a tabela não tem default
+ * para nenhum deles. Ler esta função de cima a baixo é ler a tabela de CHECKs da
+ * migration.
+ */
+export function linhaDeConfig(
+  config: ConfigDoContrato,
+  base: { habitoId: string; versao: number; vigenteDe: string; vigenteAte?: string | null },
+): HabitoConfigInsert {
+  const fixo = config.modo === "fixo" ? config.cadencia : null;
+
+  return {
+    habito_id: base.habitoId,
+    tipo: config.meta.tipo,
+    versao: base.versao,
+    vigente_de: base.vigenteDe,
+    vigente_ate: base.vigenteAte ?? null,
+
+    cadencia: config.cadencia.tipo,
+    cadencia_intervalo:
+      config.cadencia.tipo === "cada_n_dias" ? config.cadencia.intervalo : null,
+    modo: config.modo,
+    meta_ocorrencias: config.modo === "flexivel" ? config.metaOcorrencias : null,
+    dias_semana: fixo !== null && fixo.tipo === "semanal" ? fixo.diasSemana : null,
+    dias_mes: fixo !== null && fixo.tipo === "mensal" ? fixo.diasMes : null,
+    horarios: fixo !== null ? (fixo.horarios ?? null) : null,
+    /* O CHECK `habito_config_notificar_em_modo` só admite lembrete no flexível. */
+    notificar_em: config.modo === "flexivel" ? config.notificarEm : null,
+
+    meta_valor: config.meta.tipo === "quantificado" ? config.meta.valor : null,
+    unidade: config.meta.tipo === "quantificado" ? config.meta.unidade : null,
+    meta_minutos: config.meta.tipo === "duracao" ? config.meta.minutos : null,
+    tolerancia_recaidas: config.meta.tipo === "negativo" ? config.meta.tolerancia : null,
+
+    congelamento_ativo: config.congelamento !== null,
+    congelamento_a_cada: config.congelamento?.aCada ?? null,
+    congelamento_max: config.congelamento?.max ?? null,
+  };
+}
+
+/**
+ * E a volta da volta: a linha como o contrato a descreve.
+ *
+ * Necessária porque `GET /api/habitos` devolve `config` no formato do contrato, e
+ * a linha do banco não é esse formato. Sem ela cada rota montaria a união à mão.
+ */
+export function configDoContrato(linha: HabitoConfig): ConfigDoContrato {
+  const meta = metaDoContrato(linha);
+  const congelamento = linha.congelamento_ativo
+    ? {
+        aCada: exigir(linha.congelamento_a_cada, "congelamento_a_cada", "congelamento ativo"),
+        max: exigir(linha.congelamento_max, "congelamento_max", "congelamento ativo"),
+      }
+    : null;
+
+  if (linha.modo === "flexivel") {
+    return {
+      modo: "flexivel",
+      cadencia: cadenciaFlexivelDoContrato(linha),
+      metaOcorrencias: exigir(linha.meta_ocorrencias, "meta_ocorrencias", "modo flexível"),
+      notificarEm: linha.notificar_em,
+      meta,
+      congelamento,
+    };
+  }
+
+  return { modo: "fixo", cadencia: cadenciaFixaDoContrato(linha), meta, congelamento };
+}
+
+function metaDoContrato(linha: HabitoConfig): ConfigDoContrato["meta"] {
+  switch (linha.tipo) {
+    case "binario":
+      return { tipo: "binario" };
+    case "quantificado":
+      return {
+        tipo: "quantificado",
+        valor: exigir(linha.meta_valor, "meta_valor", "hábito quantificado"),
+        unidade: exigir(linha.unidade, "unidade", "hábito quantificado"),
+      };
+    case "duracao":
+      return {
+        tipo: "duracao",
+        minutos: exigir(linha.meta_minutos, "meta_minutos", "hábito de duração"),
+      };
+    case "negativo":
+      return {
+        tipo: "negativo",
+        tolerancia: exigir(linha.tolerancia_recaidas, "tolerancia_recaidas", "hábito negativo"),
+      };
+  }
+}
+
+type CadenciaFlexivelDoContrato = Extract<ConfigDoContrato, { modo: "flexivel" }>["cadencia"];
+type CadenciaFixaDoContrato = Extract<ConfigDoContrato, { modo: "fixo" }>["cadencia"];
+
+function cadenciaFlexivelDoContrato(linha: HabitoConfig): CadenciaFlexivelDoContrato {
+  if (linha.cadencia === "cada_n_dias") {
+    return {
+      tipo: "cada_n_dias",
+      intervalo: exigir(linha.cadencia_intervalo, "cadencia_intervalo", "cadência cada_n_dias"),
+    };
+  }
+  return { tipo: linha.cadencia };
+}
+
+function cadenciaFixaDoContrato(linha: HabitoConfig): CadenciaFixaDoContrato {
+  const horarios = linha.horarios ?? undefined;
+
+  switch (linha.cadencia) {
+    case "diario":
+      return {
+        tipo: "diario",
+        horarios: exigir(linha.horarios, "horarios", "cadência diária no modo fixo"),
+      };
+    case "semanal":
+      return {
+        tipo: "semanal",
+        diasSemana: exigir(linha.dias_semana, "dias_semana", "cadência semanal no modo fixo").map(
+          comoDiaDaSemana,
+        ),
+        horarios,
+      };
+    case "mensal":
+      return {
+        tipo: "mensal",
+        diasMes: exigir(linha.dias_mes, "dias_mes", "cadência mensal no modo fixo"),
+        horarios,
+      };
+    case "cada_n_dias":
+      /* O CHECK `habito_config_cada_n_dias` impede esta combinação no banco. */
+      throw new Error("cada_n_dias não existe no modo fixo.");
+  }
+}

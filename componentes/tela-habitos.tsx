@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { enviar, useRecurso, type Falha } from "@/cliente/api";
 import { dataCurta, dataDeHojeNoAparelho } from "@/cliente/formato";
 import type { Habito, ListaDeHabitos } from "@/contracts";
 import { CLASSE_COR } from "./cor";
 import { Carregando, Erro } from "./estado-da-tela";
 import { Mais } from "./icones";
+import { indiceSobre, mover, ordemDe } from "./reordenar";
 import { Sequencia } from "./sequencia";
 import { Botao, Campo, classeDeBotao, CLASSE_ENTRADA, Nota } from "./ui";
 
@@ -18,9 +19,20 @@ import { Botao, Campo, classeDeBotao, CLASSE_ENTRADA, Nota } from "./ui";
  * linguagem natural, sequência e estoque de congelamento. Arquivados ficam numa
  * seção recolhida no fim — não há exclusão permanente neste app.
  *
- * A ordem é a de `habito.ordem`, a mesma do dashboard. **O arraste para
- * reordenar não está aqui**: ele persiste `habito.ordem` por
- * `PUT /api/habitos/ordem` e é item da etapa 3.2, junto do CRUD real.
+ * A ordem é a de `habito.ordem`, a mesma do dashboard, e o arraste a persiste por
+ * `PUT /api/habitos/ordem`.
+ *
+ * **O arraste usa Pointer Events, não a API de arrastar do HTML5.** `draggable`
+ * simplesmente não dispara em toque no iOS e no Android, e este app é usado no
+ * celular — seria um recurso que só funciona no desktop. O ponteiro unifica os
+ * dois: o mesmo código atende dedo, mouse e caneta.
+ *
+ * A alça tem `touch-action: none` e só ela: arrastar pela alça não rola a página,
+ * e o resto da linha continua rolando normalmente. Sem essa separação, o gesto de
+ * reordenar e o de rolar disputariam o mesmo toque.
+ *
+ * Para quem não arrasta — teclado, leitor de tela — as mesmas posições se movem
+ * pelos botões ↑ e ↓ da alça, que chamam a mesma função.
  *
  * As quatro ações por linha devolvem o **hábito**, não `ok: true` — é o que
  * permite redesenhar só aquela linha em vez de recarregar a lista. Pausa e
@@ -41,6 +53,43 @@ export function TelaHabitos() {
   }
 
   const lista = recurso.dados;
+
+  /**
+   * Persiste a ordem depois do gesto, não durante.
+   *
+   * Um `PUT` por quadro de `pointermove` seria dezenas de chamadas por arraste, e
+   * a lista já é redesenhada localmente — o servidor só precisa saber onde o
+   * dedo parou. A resposta traz a lista como ficou, que é o que confirma o
+   * estado otimista.
+   */
+  async function persistirOrdem(ordenados: Habito[]) {
+    definir({ ...lista, habitos: ordenados });
+    setFalha(null);
+
+    const r = await enviar<ListaDeHabitos>("/api/habitos/ordem", "PUT", {
+      ordem: ordemDe(ordenados),
+    });
+
+    if (!r.ok) {
+      setFalha(r.falha);
+      /* Volta ao que o servidor tem: ordem otimista que não gravou é mentira. */
+      void recarregar();
+      return;
+    }
+
+    definir(r.dados);
+  }
+
+  /** O ↑/↓ da alça: mesma conta do arraste, por um passo. */
+  function moverUm(id: string, direcao: -1 | 1) {
+    const de = lista.habitos.findIndex((h) => h.id === id);
+    if (de < 0) return;
+
+    const para = de + direcao;
+    if (para < 0 || para >= lista.habitos.length) return;
+
+    void persistirOrdem(mover(lista.habitos, de, para));
+  }
 
   /** Troca um hábito de lugar entre ativos e arquivados conforme o que voltou. */
   function aplicar(atualizado: Habito) {
@@ -108,11 +157,13 @@ export function TelaHabitos() {
           desarquive um lá embaixo.
         </Nota>
       ) : (
-        <ul className="flex flex-col gap-2">
-          {lista.habitos.map((habito) => (
-            <CartaoDeHabito key={habito.id} habito={habito} ocupado={ocupado} aoAgir={agir} />
-          ))}
-        </ul>
+        <ListaArrastavel
+          habitos={lista.habitos}
+          ocupado={ocupado}
+          aoAgir={agir}
+          aoReordenar={persistirOrdem}
+          aoMoverUm={moverUm}
+        />
       )}
 
       {lista.arquivados.length > 0 && (
@@ -132,6 +183,181 @@ export function TelaHabitos() {
 }
 
 /**
+ * A lista dos ativos, arrastável.
+ *
+ * O arraste acontece **só no estado local** (`ordem`), e o servidor é chamado
+ * uma vez no `pointerup`. Durante o gesto a lista do recurso não é tocada: um
+ * `definir()` por quadro faria o componente remontar e perder a captura do
+ * ponteiro no meio do movimento.
+ */
+function ListaArrastavel({
+  habitos,
+  ocupado,
+  aoAgir,
+  aoReordenar,
+  aoMoverUm,
+}: {
+  readonly habitos: Habito[];
+  readonly ocupado: boolean;
+  readonly aoAgir: (url: string, metodo: string, corpo?: unknown) => void;
+  readonly aoReordenar: (ordenados: Habito[]) => void;
+  readonly aoMoverUm: (id: string, direcao: -1 | 1) => void;
+}) {
+  const [arrastando, setArrastando] = useState<string | null>(null);
+  const [ordem, setOrdem] = useState<Habito[] | null>(null);
+  const itens = useRef(new Map<string, HTMLLIElement>());
+
+  /* Durante o gesto vale a ordem local; fora dele, a do servidor. */
+  const visivel = ordem ?? habitos;
+
+  function centros(atual: Habito[]): number[] {
+    return atual.map((h) => {
+      const elemento = itens.current.get(h.id);
+      if (elemento === undefined) return Number.POSITIVE_INFINITY;
+      const caixa = elemento.getBoundingClientRect();
+      return caixa.top + caixa.height / 2;
+    });
+  }
+
+  function aoPegar(evento: React.PointerEvent, id: string) {
+    /*
+     * `setPointerCapture` na própria alça: sem ela, o `pointermove` para de
+     * chegar no instante em que o dedo sai de cima do elemento — que é a primeira
+     * coisa que acontece ao arrastar.
+     */
+    evento.currentTarget.setPointerCapture(evento.pointerId);
+    setArrastando(id);
+    setOrdem(habitos);
+  }
+
+  function aoMover(evento: React.PointerEvent) {
+    if (arrastando === null || ordem === null) return;
+
+    const de = ordem.findIndex((h) => h.id === arrastando);
+    const para = indiceSobre(centros(ordem), evento.clientY);
+
+    if (de === para) return;
+
+    setOrdem(mover(ordem, de, para));
+  }
+
+  function aoSoltar() {
+    if (arrastando === null || ordem === null) return;
+
+    const mudou = ordem.some((h, i) => h.id !== habitos[i]?.id);
+
+    setArrastando(null);
+    const resultado = ordem;
+    setOrdem(null);
+
+    /* Soltar no mesmo lugar não é edição: não gasta uma chamada. */
+    if (mudou) aoReordenar(resultado);
+  }
+
+  return (
+    <ul className="flex flex-col gap-2">
+      {visivel.map((habito, i) => (
+        <CartaoDeHabito
+          key={habito.id}
+          habito={habito}
+          ocupado={ocupado}
+          aoAgir={aoAgir}
+          arrastando={arrastando === habito.id}
+          aoRegistrarElemento={(elemento) => {
+            if (elemento === null) itens.current.delete(habito.id);
+            else itens.current.set(habito.id, elemento);
+          }}
+          alca={
+            <Alca
+              nome={habito.nome}
+              posicao={i + 1}
+              total={visivel.length}
+              ocupado={ocupado}
+              aoPegar={(evento) => aoPegar(evento, habito.id)}
+              aoMover={aoMover}
+              aoSoltar={aoSoltar}
+              aoSubir={() => aoMoverUm(habito.id, -1)}
+              aoDescer={() => aoMoverUm(habito.id, 1)}
+            />
+          }
+        />
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * A alça: arraste por ponteiro e, para quem não arrasta, dois botões.
+ *
+ * `touch-action: none` fica **aqui** e não na linha: é o que permite arrastar
+ * pela alça sem rolar a página, mantendo o resto da linha rolável. Aplicar na
+ * linha inteira travaria a rolagem da tela.
+ */
+function Alca({
+  nome,
+  posicao,
+  total,
+  ocupado,
+  aoPegar,
+  aoMover,
+  aoSoltar,
+  aoSubir,
+  aoDescer,
+}: {
+  readonly nome: string;
+  readonly posicao: number;
+  readonly total: number;
+  readonly ocupado: boolean;
+  readonly aoPegar: (evento: React.PointerEvent) => void;
+  readonly aoMover: (evento: React.PointerEvent) => void;
+  readonly aoSoltar: () => void;
+  readonly aoSubir: () => void;
+  readonly aoDescer: () => void;
+}) {
+  return (
+    <div className="flex shrink-0 flex-col items-center justify-center gap-0.5 py-1 pl-1">
+      <button
+        type="button"
+        disabled={ocupado || posicao === 1}
+        onClick={aoSubir}
+        aria-label={`Mover ${nome} para cima`}
+        className="flex size-7 items-center justify-center rounded text-xs text-texto-fraco disabled:opacity-30"
+      >
+        ↑
+      </button>
+
+      <div
+        role="button"
+        tabIndex={-1}
+        aria-hidden
+        onPointerDown={aoPegar}
+        onPointerMove={aoMover}
+        onPointerUp={aoSoltar}
+        onPointerCancel={aoSoltar}
+        /*
+         * `aria-hidden` e `tabIndex={-1}`: para leitor de tela e teclado, quem
+         * reordena são os dois botões acima e abaixo, que dizem o que fazem. Uma
+         * alça de arraste anunciada seria um controle sem como ser operado.
+         */
+        className="flex size-7 cursor-grab touch-none items-center justify-center text-texto-fraco"
+      >
+        ⠿
+      </div>
+
+      <button
+        type="button"
+        disabled={ocupado || posicao === total}
+        onClick={aoDescer}
+        aria-label={`Mover ${nome} para baixo`}
+        className="flex size-7 items-center justify-center rounded text-xs text-texto-fraco disabled:opacity-30"
+      >
+        ↓
+      </button>
+    </div>
+  );
+}
+
+/**
  * Um hábito na lista.
  *
  * Pausado fica a **52% de opacidade** — a marca de `pausado` da paleta. É o
@@ -143,10 +369,17 @@ function CartaoDeHabito({
   habito,
   ocupado,
   aoAgir,
+  alca,
+  arrastando = false,
+  aoRegistrarElemento,
 }: {
   readonly habito: Habito;
   readonly ocupado: boolean;
   readonly aoAgir: (url: string, metodo: string, corpo?: unknown) => void;
+  /** Ausente nos arquivados: ordem de arquivado não é ordem de nada. */
+  readonly alca?: React.ReactNode;
+  readonly arrastando?: boolean;
+  readonly aoRegistrarElemento?: (elemento: HTMLLIElement | null) => void;
 }) {
   const [pausando, setPausando] = useState(false);
   const arquivado = habito.arquivadoEm !== null;
@@ -154,10 +387,15 @@ function CartaoDeHabito({
 
   return (
     <li
-      className={`flex overflow-hidden rounded-xl border border-linha bg-cartao ${pausado ? "opacity-[0.52]" : ""}`}
+      ref={aoRegistrarElemento}
+      className={`flex overflow-hidden rounded-xl border bg-cartao ${
+        arrastando ? "border-texto shadow-lg" : "border-linha"
+      } ${pausado ? "opacity-[0.52]" : ""}`}
     >
       {/* O filete de 3 px na cor do hábito: marca, não texto. */}
       <span aria-hidden className={`w-[3px] shrink-0 ${CLASSE_COR[habito.cor].fundo}`} />
+
+      {alca}
 
       <div className="min-w-0 flex-1 p-3">
         <div className="flex items-start justify-between gap-3">

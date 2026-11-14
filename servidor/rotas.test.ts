@@ -1,10 +1,15 @@
 /**
- * Testes de fiação dos stubs.
+ * Fiação das rotas: schema, portão, validação de entrada e o matcher do proxy.
  *
- * Não testam lógica — não há nenhuma. Testam as três coisas que um stub pode
- * errar e que só apareceriam na etapa 2, depois de a tela já estar construída
- * em cima: a resposta bate com o schema do contrato, o portão fecha, e a
- * validação de entrada está realmente ligada em cada rota que escreve.
+ * Testam as três coisas que uma rota pode errar sem que nenhum teste de domínio
+ * perceba: a resposta não bate com o schema do contrato, o portão não fecha, a
+ * validação de entrada não está ligada.
+ *
+ * As rotas de domínio ainda devolvem fixture — a implementação delas é 3.2 a
+ * 3.4 —, e é justamente por isso que a conformidade com o contrato vale: é o que
+ * garante que a tela construída em cima do stub continue valendo quando o stub
+ * sair. A autenticação, já real, tem suíte própria em
+ * [autenticacao.test.ts](autenticacao.test.ts).
  */
 
 import { readFileSync } from "node:fs";
@@ -39,8 +44,6 @@ import {
   habito,
   hoje,
   listaDeHabitos,
-  loginConcluido,
-  passkeyCadastrada,
   registroCriado,
   registroRemovido,
   retroativo,
@@ -49,14 +52,18 @@ import {
   type RespostaErro,
 } from "@/contracts";
 import * as f from "@/contracts/fixtures";
+import { db } from "@/db/knex";
 import { proxy } from "@/proxy";
-import { COOKIE_SESSAO, lerSessao } from "./cookie-sessao";
+import {
+  abrirSessaoDeTeste,
+  encerrarBanco,
+  limpar,
+  semearConfig,
+  semearPasskey,
+} from "./apoio-de-teste";
+import { COOKIE_SESSAO } from "./cookie-sessao";
 
 import { GET as authEstado } from "@/app/api/auth/estado/route";
-import { POST as authLogout } from "@/app/api/auth/logout/route";
-import { POST as authSenha } from "@/app/api/auth/senha/route";
-import { POST as authReset } from "@/app/api/auth/biometria/reset/route";
-import { POST as authRegistro } from "@/app/api/auth/webauthn/registro/route";
 import { POST as authRegistroOpcoes } from "@/app/api/auth/webauthn/registro/opcoes/route";
 import { GET as configGet, PATCH as configPatch } from "@/app/api/config/route";
 import { GET as exportar } from "@/app/api/exportar/route";
@@ -78,14 +85,23 @@ import { DELETE as registroDelete } from "@/app/api/registros/[id]/route";
 
 const ID = f.habitoAgua.id;
 
-function autenticar(temPasskey: boolean) {
-  jar.set(COOKIE_SESSAO, temPasskey ? "stub-com-passkey" : "stub-sem-passkey");
+/**
+ * Autentica de verdade: grava a sessão (e a passkey, quando pedida) no banco.
+ *
+ * Virou `async` na etapa 3.1 e isso é o próprio ponto — não há mais valor de
+ * cookie que se acredite sozinho. O que o cookie carrega é a dica de navegação;
+ * quem decide é a linha em `sessao` mais a existência de `credencial_passkey`.
+ */
+async function autenticar(temPasskey: boolean) {
+  if (temPasskey) await semearPasskey();
+  jar.set(COOKIE_SESSAO, await abrirSessaoDeTeste(temPasskey ? "completa" : "provisoria"));
 }
 
 function post(corpo: unknown): Request {
   return new Request("http://localhost/api", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    /* `origin` porque as rotas de WebAuthn o conferem contra o `rp_id` gravado. */
+    headers: { "content-type": "application/json", origin: "http://localhost" },
     body: JSON.stringify(corpo),
   });
 }
@@ -98,41 +114,30 @@ function pagina(caminho: string, cookie?: string): NextRequest {
 
 const ctxId = { params: Promise.resolve({ id: ID }) };
 
+/* Dicas de cookie para os testes do proxy, que não tocam o banco. */
+const PROVISORIA = "token-de-teste.provisoria";
+const COMPLETA = "token-de-teste.completa";
+
 function novoHabito() {
   return { nome: "💧 Água", cor: "ciano", config: f.habitoAgua.config };
 }
 
 /**
- * `APP_MODO` é fixado em produção a cada teste.
+ * Banco limpo e `APP_MODO` fixado em produção a cada caso.
  *
- * Não é cerimônia: `next/jest` carrega o `.env` do projeto, onde a chave vale
- * `desenvolvimento` — sem este pino, a suíte inteira testaria o ambiente da
- * máquina de quem roda, e o fluxo de primeiro acesso passaria ou falharia
- * conforme o arquivo local. O comportamento de desenvolvimento tem seu próprio
- * bloco, que liga a chave explicitamente.
+ * O pino do modo não é cerimônia: `next/jest` carrega o `.env` do projeto, onde
+ * a chave vale `desenvolvimento` — sem ele, a suíte testaria o ambiente da
+ * máquina de quem roda e o portão passaria ou falharia conforme o arquivo local.
+ * Quem quer o modo frouxo o liga explicitamente.
  */
-beforeEach(() => {
+beforeEach(async () => {
   jar.clear();
+  await limpar(db);
   process.env.APP_MODO = "producao";
+  await semearConfig();
 });
 
-// ─── Cookie de sessão ────────────────────────────────────────────────────────
-
-describe("lerSessao", () => {
-  it("sem cookie não há sessão", () => {
-    expect(lerSessao(undefined)).toBeNull();
-  });
-
-  it("valor desconhecido não vira sessão", () => {
-    // Importa porque o stub acredita no cookie: o conjunto aceito é fechado.
-    expect(lerSessao("qualquer-coisa")).toBeNull();
-  });
-
-  it("distingue a sessão do primeiro acesso da sessão completa", () => {
-    expect(lerSessao("stub-sem-passkey")).toEqual({ token: "stub-sem-passkey", temPasskey: false });
-    expect(lerSessao("stub-com-passkey")?.temPasskey).toBe(true);
-  });
-});
+afterAll(encerrarBanco);
 
 // ─── Guarda de navegação ─────────────────────────────────────────────────────
 
@@ -147,35 +152,49 @@ describe("proxy", () => {
     expect(redirecionou(proxy(pagina("/login")))).toBe(false);
   });
 
-  it("com sessão e sem passkey, só o cadastro de biometria existe", () => {
+  it("com dica provisória, só o cadastro de biometria existe", () => {
     // O "não existe estado intermediário utilizável" do mapa de autenticação.
-    expect(destino(proxy(pagina("/", "stub-sem-passkey")))).toBe("/biometria");
-    expect(destino(proxy(pagina("/ajustes", "stub-sem-passkey")))).toBe("/biometria");
-    expect(destino(proxy(pagina("/login", "stub-sem-passkey")))).toBe("/biometria");
-    expect(redirecionou(proxy(pagina("/biometria", "stub-sem-passkey")))).toBe(false);
+    expect(destino(proxy(pagina("/", PROVISORIA)))).toBe("/biometria");
+    expect(destino(proxy(pagina("/ajustes", PROVISORIA)))).toBe("/biometria");
+    expect(destino(proxy(pagina("/login", PROVISORIA)))).toBe("/biometria");
+    expect(redirecionou(proxy(pagina("/biometria", PROVISORIA)))).toBe(false);
   });
 
-  it("com passkey, ninguém fica preso no login", () => {
-    expect(destino(proxy(pagina("/login", "stub-com-passkey")))).toBe("/");
-    expect(destino(proxy(pagina("/biometria", "stub-com-passkey")))).toBe("/");
-    expect(redirecionou(proxy(pagina("/habitos", "stub-com-passkey")))).toBe(false);
+  it("com dica completa, ninguém fica preso no login", () => {
+    expect(destino(proxy(pagina("/login", COMPLETA)))).toBe("/");
+    expect(destino(proxy(pagina("/biometria", COMPLETA)))).toBe("/");
+    expect(redirecionou(proxy(pagina("/habitos", COMPLETA)))).toBe(false);
   });
 
   it("em desenvolvimento o cadastro de biometria continua alcançável", () => {
     /*
      * Lá a senha abre sessão completa, então sem esta exceção a tela de
-     * biometria — uma das sete que a etapa 2 existe para percorrer — não teria
-     * como ser aberta. O login segue redirecionando: quem tem sessão está
-     * dentro.
+     * biometria — uma das sete telas — não teria como ser aberta. O login segue
+     * redirecionando: quem tem sessão está dentro.
      */
     process.env.APP_MODO = "desenvolvimento";
 
-    expect(redirecionou(proxy(pagina("/biometria", "stub-com-passkey")))).toBe(false);
-    expect(destino(proxy(pagina("/login", "stub-com-passkey")))).toBe("/");
+    expect(redirecionou(proxy(pagina("/biometria", COMPLETA)))).toBe(false);
+    expect(destino(proxy(pagina("/login", COMPLETA)))).toBe("/");
   });
 
-  it("cookie inválido é tratado como ausência de sessão", () => {
+  it("cookie de formato desconhecido é ausência de sessão", () => {
+    /*
+     * Inclui o formato do stub da etapa 2: um cookie antigo guardado no
+     * navegador tem de cair no login, não virar sessão de estado inventado.
+     */
     expect(destino(proxy(pagina("/", "lixo")))).toBe("/login");
+    expect(destino(proxy(pagina("/", "stub-com-passkey")))).toBe("/login");
+    expect(destino(proxy(pagina("/", "token-sem-sufixo.")))).toBe("/login");
+  });
+
+  it("o proxy não consulta banco: a dica basta para ele, e não autoriza nada", () => {
+    /*
+     * Nenhuma sessão existe no banco neste caso, e o proxy ainda assim deixa
+     * passar — é a verificação otimista que a documentação do Next recomenda. A
+     * recusa vem de `exigirAcesso()`, coberta logo abaixo.
+     */
+    expect(redirecionou(proxy(pagina("/habitos", COMPLETA)))).toBe(false);
   });
 });
 
@@ -194,7 +213,6 @@ describe("portão", () => {
     ["GET /api/config", () => configGet()],
     ["GET /api/exportar", () => exportar()],
     ["POST /api/push/assinatura", () => pushAssinatura(post({}))],
-    ["POST /api/auth/biometria/reset", () => authReset(post({}))],
   ];
 
   it.each(rotas)("%s responde 401 sem sessão", async (_nome, chamar) => {
@@ -207,7 +225,7 @@ describe("portão", () => {
   it.each(rotas)("%s responde 409 na sessão sem passkey", async (_nome, chamar) => {
     // A guarda do proxy só vale para telas; sem este portão, um fetch operaria
     // o app inteiro a partir da sessão provisória do primeiro acesso.
-    autenticar(false);
+    await autenticar(false);
     const res = await chamar();
     expect(res.status).toBe(409);
     const corpo: RespostaErro = await res.json();
@@ -215,19 +233,15 @@ describe("portão", () => {
   });
 
   it("as rotas do cadastro de biometria aceitam a sessão sem passkey", async () => {
-    autenticar(false);
-    expect((await authRegistroOpcoes()).status).toBe(200);
-  });
-
-  it("logout não exige sessão — sair sem estar dentro é idempotente", async () => {
-    expect((await authLogout()).status).toBe(200);
+    await autenticar(false);
+    expect((await authRegistroOpcoes(post({}))).status).toBe(200);
   });
 });
 
 // ─── Respostas contra os schemas ─────────────────────────────────────────────
 
 describe("todo stub responde o que o contrato promete", () => {
-  beforeEach(() => autenticar(true));
+  beforeEach(async () => autenticar(true));
 
   const casos: Array<[string, Parameters<typeof exigirValido>[0], () => Promise<Response>]> = [
     ["GET /api/hoje", hoje, () => hojeGet()],
@@ -264,7 +278,7 @@ describe("todo stub responde o que o contrato promete", () => {
           }),
         ),
     ],
-    ["GET /api/auth/estado", estadoAuth, () => authEstado()],
+    ["GET /api/auth/estado", estadoAuth, () => authEstado(new Request("http://localhost/api"))],
   ];
 
   it.each(casos)("%s", async (nome, schema, chamar) => {
@@ -282,7 +296,7 @@ describe("todo stub responde o que o contrato promete", () => {
 // ─── Validação de entrada ────────────────────────────────────────────────────
 
 describe("validação ligada nas rotas que escrevem", () => {
-  beforeEach(() => autenticar(true));
+  beforeEach(async () => autenticar(true));
 
   it("recusa configuração que os CHECKs do banco recusariam", async () => {
     const res = await habitosPost(
@@ -358,71 +372,6 @@ describe("validação ligada nas rotas que escrevem", () => {
     expect((await confirmado.json()).persistido).toBe(true);
   });
 
-  it("o reset de biometria exige a confirmação digitada", async () => {
-    expect((await authReset(post({ confirmacao: "resetar" }))).status).toBe(422);
-
-    autenticar(true);
-    expect((await authReset(post({ confirmacao: "RESETAR BIOMETRIA" }))).status).toBe(200);
-  });
-});
-
-// ─── Fluxo de sessão ─────────────────────────────────────────────────────────
-
-describe("o cookie percorre o fluxo de primeiro acesso", () => {
-  it("senha abre sessão sem passkey, o cadastro a completa, o logout a encerra", async () => {
-    const login = await authSenha(post({ senha: "qualquer" }));
-    expect(exigirValido(loginConcluido, await login.json(), "login").proximoPasso).toBe(
-      "cadastrar_biometria",
-    );
-    expect(lerSessao(jar.get(COOKIE_SESSAO))?.temPasskey).toBe(false);
-
-    const antes = exigirValido(estadoAuth, await (await authEstado()).json(), "estado");
-    expect(antes).toMatchObject({ autenticado: true, temPasskey: false, senhaAtiva: true });
-
-    const cadastro = await authRegistro(post({ credencial: { id: "c1", type: "public-key" } }));
-    expect(cadastro.status).toBe(201);
-    exigirValido(passkeyCadastrada, await cadastro.json(), "passkey");
-    expect(lerSessao(jar.get(COOKIE_SESSAO))?.temPasskey).toBe(true);
-
-    const depois = exigirValido(estadoAuth, await (await authEstado()).json(), "estado");
-    expect(depois).toMatchObject({ autenticado: true, temPasskey: true, senhaAtiva: false });
-
-    await authLogout();
-    expect(lerSessao(jar.get(COOKIE_SESSAO))).toBeNull();
-  });
-
-  it("em desenvolvimento a senha abre uma sessão completa e a mantém ativa", async () => {
-    /*
-     * O par que a chave existe para separar. Em produção a senha é um pedágio
-     * de uso único; em desenvolvimento ela é a porta de entrada do desktop sem
-     * autenticador, e continua valendo ao lado da passkey.
-     */
-    process.env.APP_MODO = "desenvolvimento";
-
-    const login = await authSenha(post({ senha: "qualquer" }));
-    expect(exigirValido(loginConcluido, await login.json(), "login").proximoPasso).toBe("dashboard");
-    expect(lerSessao(jar.get(COOKIE_SESSAO))?.temPasskey).toBe(true);
-
-    const estado = exigirValido(estadoAuth, await (await authEstado()).json(), "estado");
-    expect(estado).toMatchObject({
-      autenticado: true,
-      temPasskey: true,
-      senhaAtiva: true,
-      modoDesenvolvimento: true,
-    });
-
-    // E a sessão da senha já abre as rotas de domínio, sem passar pela biometria.
-    expect((await hojeGet()).status).toBe(200);
-  });
-
-  it("o reset de biometria derruba a própria sessão", async () => {
-    // Coerente com a revogação em massa: deixar o cookie de pé contradiria o
-    // que a rota acabou de fazer no banco.
-    autenticar(true);
-
-    await authReset(post({ confirmacao: "RESETAR BIOMETRIA" }));
-    expect(lerSessao(jar.get(COOKIE_SESSAO))).toBeNull();
-  });
 });
 
 /**

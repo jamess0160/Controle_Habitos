@@ -1,36 +1,44 @@
 import type { EstadoAuth } from "@/contracts";
+import { estadoDaSenha } from "@/servidor/credencial";
 import { json } from "@/servidor/http";
 import { emDesenvolvimento } from "@/servidor/modo";
+import { ipDoPedido } from "@/servidor/pedido";
 import { sessaoAtual } from "@/servidor/sessao";
+import { estadoDeBloqueio } from "@/servidor/tentativas";
+import { temPasskeyCadastrada } from "@/servidor/webauthn";
 
 /**
  * GET /api/auth/estado
  *
- * Única rota de leitura que **não** devolve fixture: é ela que diz à tela de
- * login o que mostrar, então responder um valor fixo deixaria o fluxo de
- * primeiro acesso → biometria → dashboard impossível de percorrer na etapa 2.
+ * É daqui que a tela de login decide o que mostrar, e os quatro campos vêm de
+ * quatro lugares diferentes: a sessão do cookie, `credencial_passkey`,
+ * `credencial_senha` e `tentativa_login`.
  *
- * Sem sessão, `temPasskey` é `false` — o stub não tem como saber se existe
- * passkey cadastrada sem consultar `credencial_passkey`, e cair no caminho do
- * primeiro acesso é o palpite útil. A etapa 3.1 lê as duas colunas do banco e
- * `bloqueadoAte` sai de `tentativa_login`.
- *
- * `senhaAtiva` é o único campo que o modo do app altera, e é o ponto todo da
- * chave (ver [servidor/modo.ts](../../../../servidor/modo.ts)): em produção a
- * senha morre no cadastro da biometria; em desenvolvimento ela continua valendo
- * ao lado da passkey, porque é o que permite entrar num desktop sem
- * autenticador.
+ * **Rota pública** — tem de ser: quem está trancado fora é justamente quem
+ * precisa dela. Por isso nada aqui conta mais do que a tela de login já pode
+ * ver: existe ou não passkey, a senha está ou não ativa, há ou não bloqueio em
+ * curso. Nenhum desses três ajuda quem não tem a credencial.
  */
-export async function GET() {
+export async function GET(req: Request) {
   const sessao = await sessaoAtual();
-  const temPasskey = sessao?.temPasskey ?? false;
   const desenvolvimento = emDesenvolvimento();
+
+  const [temPasskey, senha, bloqueio] = await Promise.all([
+    temPasskeyCadastrada(),
+    estadoDaSenha(),
+    estadoDeBloqueio(ipDoPedido(req)),
+  ]);
 
   const estado: EstadoAuth = {
     autenticado: sessao !== null,
     temPasskey,
-    senhaAtiva: desenvolvimento || !temPasskey,
-    bloqueadoAte: null,
+    /*
+     * Em desenvolvimento a senha vale mesmo com passkey cadastrada — é o ponto
+     * todo de `APP_MODO` (ver servidor/modo.ts). Em produção `senhaAtiva` é a
+     * coluna do banco, e o cadastro da passkey é quem a desliga.
+     */
+    senhaAtiva: senha.ativa || (desenvolvimento && senha.existe),
+    bloqueadoAte: bloqueio.bloqueadoAte?.toISOString() ?? null,
     modoDesenvolvimento: desenvolvimento,
   };
 

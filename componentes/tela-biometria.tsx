@@ -3,9 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { instalar, pedirPermissaoDeNotificacao, useConviteDeInstalacao, useSuportaWebauthn } from "@/cliente/ambiente";
-import { enviar, useRecurso, type Falha } from "@/cliente/api";
+import { enviar, type Falha } from "@/cliente/api";
 import { criarPasskey, mensagemDeErroWebauthn } from "@/cliente/webauthn";
-import type { EstadoAuth, Ok, OpcoesWebauthn, PasskeyCadastrada } from "@/contracts";
+import type { Ok, OpcoesWebauthn, PasskeyCadastrada } from "@/contracts";
 import { Botao, Nota } from "./ui";
 
 /**
@@ -19,6 +19,12 @@ import { Botao, Nota } from "./ui";
  * completa e esta tela deixa de ser pedágio — passa a ser uma tela que se visita
  * por escolha, para exercitar o fluxo. É o único jeito de entrar num desktop sem
  * autenticador, e está documentado em [servidor/modo.ts](../servidor/modo.ts).
+ *
+ * O botão "pular a biometria (dev)" da etapa 2 saiu na 3.1: ele existia porque o
+ * `challenge` das fixtures era inventado e o cadastro real falhava sempre. Agora o
+ * desafio é de verdade, `credentials.create()` funciona em `localhost` com
+ * qualquer autenticador de plataforma, e quem não tem nenhum entra por senha —
+ * que é justamente o que `APP_MODO` garante.
  *
  * Três coisas acontecem ao concluir, e as três estão aqui de propósito: a senha
  * é desativada, a instalação da PWA é oferecida e a permissão de notificação é
@@ -34,17 +40,6 @@ export function TelaBiometria() {
   const router = useRouter();
   const suporta = useSuportaWebauthn();
   const temConvite = useConviteDeInstalacao();
-
-  /*
-   * O modo do app vem do servidor, não de uma variável pública: a chave é
-   * `APP_MODO` e quem a lê é `GET /api/auth/estado` (ver
-   * [servidor/modo.ts](../servidor/modo.ts)). A tela **não** espera por essa
-   * resposta — o bloco de desenvolvimento aparece um instante depois, e segurar
-   * o cadastro de biometria atrás de uma segunda requisição seria pagar um
-   * carregamento por uma informação que só interessa a um botão de andaime.
-   */
-  const { recurso: auth } = useRecurso<EstadoAuth>("/api/auth/estado");
-  const desenvolvimento = auth.estado === "pronto" && auth.dados.modoDesenvolvimento;
 
   const [passo, setPasso] = useState<Passo>("explicando");
   const [passkey, setPasskey] = useState<PasskeyCadastrada | null>(null);
@@ -91,25 +86,6 @@ export function TelaBiometria() {
     }
 
     await concluir(credencial);
-  }
-
-  /**
-   * Caminho de desenvolvimento: promove a sessão sem passar pelo aparelho.
-   *
-   * O `challenge` das fixtures é inventado, então o `credentials.create()` acima
-   * **falha de verdade** na etapa 2 — e sem esta saída o fluxo primeiro acesso →
-   * biometria → dashboard seria impossível de percorrer, que é justamente o que
-   * a etapa 2 existe para validar. O stub de `POST .../registro` só confere o
-   * shape do payload, então um objeto sintético basta para ele promover o cookie.
-   *
-   * É um botão separado e visível, não um `catch` que finge sucesso: a diferença
-   * entre "a biometria funcionou" e "pulamos a biometria" não pode ficar
-   * escondida. Removido na etapa 3.1.
-   */
-  async function simularCadastro() {
-    setFalha(null);
-    setOcupado(true);
-    await concluir({ id: "credencial-simulada", type: "public-key" });
   }
 
   async function pedirNotificacao() {
@@ -202,21 +178,6 @@ export function TelaBiometria() {
           Este navegador não tem suporte a WebAuthn, então não há como cadastrar a passkey aqui.
           Abra o app no aparelho que vai usar.
         </Nota>
-      )}
-
-      {desenvolvimento && (
-        <div className="flex flex-col gap-2 border-t border-linha pt-4">
-          <p className="text-[0.68rem] uppercase tracking-widest text-texto-fraco">
-            Desenvolvimento
-          </p>
-          <Botao disabled={ocupado} onClick={() => void simularCadastro()}>
-            Pular a biometria (dev)
-          </Botao>
-          <p className="text-xs leading-snug text-texto-fraco">
-            O desafio das fixtures é inventado, então o cadastro real falha até a etapa 3.1. Isto
-            promove a sessão para o dashboard.
-          </p>
-        </div>
       )}
 
       <Botao variante="fantasma" largo onClick={() => void sair()}>

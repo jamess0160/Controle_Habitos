@@ -1,13 +1,12 @@
 import "dotenv/config";
-import { hash } from "@node-rs/argon2";
 import type { Knex } from "knex";
-
-/** Parâmetros Argon2id alinhados à recomendação da OWASP (m=19 MiB, t=2, p=1). */
-export const PARAMETROS_ARGON2 = {
-  memoryCost: 19456,
-  timeCost: 2,
-  parallelism: 1,
-} as const;
+/*
+ * Os parâmetros do Argon2id vêm de `servidor/senha.ts`, e não de uma cópia aqui:
+ * semear com parâmetros diferentes dos que a rota de login usa para conferir é a
+ * forma mais silenciosa de quebrar a autenticação. Aquele módulo não importa
+ * Next nem banco, exatamente para poder ser usado daqui.
+ */
+import { gerarHash } from "../../servidor/senha";
 
 /**
  * Semeia a senha do primeiro acesso a partir de APP_SENHA_INICIAL.
@@ -31,7 +30,7 @@ export async function seed(knex: Knex): Promise<void> {
   }
 
   await knex("credencial_senha").insert({
-    hash: await hash(senha, PARAMETROS_ARGON2),
+    hash: await gerarHash(senha),
     ativa: true,
   });
 

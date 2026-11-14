@@ -1,5 +1,12 @@
-import { opcoesRegistroFixture } from "@/contracts/fixtures";
-import { exigirSessao, json } from "@/servidor/http";
+import { exigirSessao, falha, json } from "@/servidor/http";
+import { origemDoPedido } from "@/servidor/pedido";
+import {
+  ambienteDeWebauthn,
+  codigoDaFalha,
+  desafiosDemais,
+  mensagemDeFalha,
+  opcoesDeRegistro,
+} from "@/servidor/webauthn";
 
 /**
  * POST /api/auth/webauthn/registro/opcoes
@@ -8,14 +15,23 @@ import { exigirSessao, json } from "@/servidor/http";
  * primeiro acesso precisa alcançar, então usa `exigirSessao` e não
  * `exigirAcesso`.
  *
- * Na etapa 3.1 esta rota grava `webauthn_desafio` antes de responder, e o
- * desafio é conferido no POST seguinte. É também a rota a limitar por taxa — não
- * por haver segredo a adivinhar, mas para não servir de torneira de escrita
- * naquela tabela.
+ * Grava `webauthn_desafio` antes de responder, e o desafio é conferido no POST
+ * seguinte. O teto de desafios é a limitação que o mapa pede: não há segredo a
+ * adivinhar aqui, mas sem teto a rota seria uma torneira de escrita naquela
+ * tabela.
  */
-export async function POST() {
+export async function POST(req: Request) {
   const acesso = await exigirSessao();
   if (!acesso.liberado) return acesso.resposta;
 
-  return json(opcoesRegistroFixture);
+  const ambiente = await ambienteDeWebauthn(origemDoPedido(req));
+  if (!ambiente.ok) {
+    return falha(codigoDaFalha(ambiente.falha), mensagemDeFalha(ambiente.falha));
+  }
+
+  if (await desafiosDemais()) {
+    return falha("bloqueado", "Muitos pedidos de biometria seguidos. Aguarde um momento.");
+  }
+
+  return json(await opcoesDeRegistro(ambiente.ambiente));
 }

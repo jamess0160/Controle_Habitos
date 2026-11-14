@@ -7,5 +7,11 @@ const criarConfig = nextJest({ dir: "./" });
 export default criarConfig({
   testEnvironment: "node",
   testMatch: ["**/*.test.ts", "**/*.test.tsx"],
+  /*
+   * O banco de teste é criado e migrado uma vez; a URL é redirecionada antes de
+   * qualquer import, porque `knexfile.ts` lê o ambiente no topo do módulo.
+   */
+  globalSetup: "<rootDir>/jest.globalSetup.ts",
+  setupFiles: ["<rootDir>/jest.setup.ts"],
   collectCoverageFrom: ["dominio/**/*.ts", "!dominio/**/*.test.ts"],
 });

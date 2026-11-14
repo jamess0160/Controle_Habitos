@@ -242,11 +242,37 @@ O `/login?simular=…` sobreviveu, agora atrás da chave, porque o stub não tem
 Substituir stubs por implementação real, tela e rota em pares, cada fatia entregue com teste.
 
 ### 3.1 Autenticação
-- [ ] senha com Argon2id, sessão com token opaco (hash no banco)
-- [ ] rate limiting: atraso progressivo + bloqueio de 15 min, IP lido de `CF-Connecting-IP`
-- [ ] WebAuthn registro e login, `counter` anti-clonagem, desativação da senha
-- [ ] reset pela interface, com revogação de sessões
-- [ ] trava de `rp_id` divergente com mensagem própria
+- [x] senha com Argon2id, sessão com token opaco (hash no banco)
+- [x] rate limiting: atraso progressivo + bloqueio de 15 min, IP lido de `CF-Connecting-IP`
+- [x] WebAuthn registro e login, `counter` anti-clonagem, desativação da senha
+- [x] reset pela interface, com revogação de sessões
+- [x] trava de `rp_id` divergente com mensagem própria
+
+**Como ficou.** Oito módulos em `servidor/`, um por responsabilidade: `senha.ts` (Argon2id, sem banco, para o seed e a CLI poderem importá-lo), `credencial.ts` (o lado que escreve `credencial_senha`), `sessao.ts`, `tentativas.ts`, `webauthn.ts`, `config.ts`, `pedido.ts` e `modo.ts`.
+
+Decisões que o código tomou e vale registrar:
+
+- **O token da sessão é opaco e o banco só guarda o SHA-256 dele.** SHA-256 e não Argon2id de propósito: Argon2id existe para resistir a força bruta sobre segredos que humanos escolhem, e cobra caro por isso; 32 bytes aleatórios não têm espaço de busca a reduzir, e o hash é conferido em **toda** requisição. O que o Argon2id protege é a senha, e lá ele está.
+- **O cookie ganhou um sufixo de dica** (`<token>.provisoria|completa`), documentado em [servidor/cookie-sessao.ts](../servidor/cookie-sessao.ts). A sessão agora mora no Postgres, e o proxy não pode consultar banco — sem a dica ele não teria como distinguir a sessão do primeiro acesso da completa, e o usuário veria o esqueleto de telas às quais não tem acesso. Forjar o sufixo não compra nada: `sessaoAtual()` ignora o sufixo e deriva `temPasskey` de `credencial_passkey`, e é essa leitura que o portão usa. Tem teste provando que a dica forjada bate em 409.
+- **A ordem dos passos do login é a regra de segurança.** Bloqueio antes de conferir a senha, porque conferir e então recusar gastaria um Argon2id por tentativa — que é o trabalho que o atacante quer impor. Senha desativada recusada com a **mesma** mensagem de senha errada, porque dizer "está desativada" contaria que existe passkey e que a senha certa não serve mais. Atraso progressivo só **depois** de falhar, nunca antes: atrasar o acerto puniria o dono do app.
+- **Falha de biometria não entra em `tentativa_login`.** A tabela não tem coluna de tipo, e é a mesma que conta o bloqueio da senha: gravar ali faria cinco biometrias canceladas bloquearem a senha do dono. Só o sucesso é registrado, que é o que o histórico precisa mostrar.
+- **O cadastro da passkey é uma transação.** Gravar a credencial sem desativar a senha deixaria duas portas; desativar a senha sem gravar a credencial deixaria **nenhuma** — e essa segunda só se conserta com acesso ao Postgres. O consumo do desafio fica fora da transação de propósito: desafio consumido tem de permanecer consumido mesmo que a transação role atrás, senão a tentativa falha o devolveria para replay.
+- **O desafio é de uso único por `UPDATE ... RETURNING` com `consumido_em IS NULL`.** Conferir e depois marcar, em dois passos, abriria a janela de replay que o desafio existe para fechar.
+- **A trava de `rp_id` compara o `Origin` do pedido com o valor gravado em `config_app`**, não com o ambiente — uma variável de ambiente mudaria junto com o deploy e a trava nunca dispararia. Tem teste com `rp_id` gravado diferente do `RP_ID` do ambiente.
+- **A regra do contador anti-clonagem saiu para uma função pura** (`contadorAceito`), porque é a única parte do WebAuthn que é decisão nossa e não da biblioteca. Zero é sempre aceito: autenticadores de plataforma mantêm o contador zerado por privacidade, e exigir crescimento recusaria todo iPhone.
+
+**O banco de teste.** A suíte passou a rodar contra Postgres real, em `controle_habito_test_<worker>`, criado e migrado pelo `globalSetup`. Um database **por worker** porque o Jest roda arquivos em paralelo e `limpar()` trunca tudo: com um database compartilhado, dois arquivos de integração truncam o banco um do outro no meio do caso — foram 21 falhas que não apareciam rodando cada arquivo sozinho. Serializar a suíte inteira resolveria, mas cobraria o preço nos testes puros de domínio, que são a maioria.
+
+**Dois achados que só o build e o banco mostraram:**
+
+1. **O Knex tem de sair do bundle** (`serverExternalPackages: ["knex"]`). Ele resolve o dialeto com um `require` dinâmico sobre o nome do cliente, então o Turbopack tenta resolver todos — `sqlite3`, `mysql2`, `oracledb`, `tedious` — e o build falha com oito módulos não encontrados. A 3.1 foi a primeira etapa a importar o Knex num route handler.
+2. **`sem_origem` não é erro de servidor.** A primeira versão mandava as falhas de WebAuthn para 500 quando não eram divergência de domínio, o que transformava um pedido sem o header `Origin` em erro interno. O mapeamento de causa para código virou uma função só, `codigoDaFalha`.
+
+**Os dois andaimes da etapa 2 morreram aqui**, como previsto: `/login?simular=…` perdeu a razão de existir (os quatro estados agora vêm do banco — percorrer um estado é colocá-lo lá) e o "pular a biometria (dev)" também (o desafio é real, `credentials.create()` funciona em `localhost`, e quem não tem autenticador entra por senha, que é o que `APP_MODO` garante). O `/login` voltou a ser estático: era `useSearchParams` que exigia a fronteira de `Suspense`.
+
+**Um estado novo apareceu na tela de login:** banco sem credencial nenhuma. Não é estado de produção, mas é o que aparece na primeira subida, e sem mensagem a tela ficava vazia. Ela agora diz qual comando rodar.
+
+**Pendente da 3.1 que é de outra sub-etapa:** as mensagens de recuperação citam `npm run cli:reset-biometria` e `cli:reset-senha`, que chegam na 3.6.
 
 ### 3.2 Hábitos
 - [ ] CRUD com **versionamento** de `habito_config` (nunca UPDATE)

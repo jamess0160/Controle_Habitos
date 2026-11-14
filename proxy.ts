@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { COOKIE_SESSAO, lerSessao } from "@/servidor/cookie-sessao";
+import { COOKIE_SESSAO, lerDica } from "@/servidor/cookie-sessao";
 import { emDesenvolvimento } from "@/servidor/modo";
 
 /**
@@ -11,6 +11,13 @@ import { emDesenvolvimento } from "@/servidor/modo";
  * tela à qual não tem acesso. A autorização de verdade é de quem responde:
  * `exigirAcesso()` em [servidor/http.ts](servidor/http.ts) para as rotas, e a
  * leitura da sessão nas telas. Proxy não é lugar de consultar banco.
+ *
+ * Desde a etapa 3.1 a sessão mora no Postgres, então aqui **não há como saber**
+ * se o token é válido nem se existe passkey — as duas coisas são consulta. O que
+ * o cookie carrega é a *dica* descrita em
+ * [servidor/cookie-sessao.ts](servidor/cookie-sessao.ts): ela decide qual tela
+ * aparece primeiro e nada mais. Um cookie forjado chega às telas e é recusado
+ * pela API na primeira chamada, com o 401/409 que o cliente já sabe tratar.
  *
  * Duas regras, as duas vindas do
  * [Mapa de autenticação](Docs/mapas/Mapa%20de%20autenticação.md):
@@ -27,14 +34,14 @@ const BIOMETRIA = "/biometria";
 const DASHBOARD = "/";
 
 export function proxy(request: NextRequest) {
-  const sessao = lerSessao(request.cookies.get(COOKIE_SESSAO)?.value);
+  const dica = lerDica(request.cookies.get(COOKIE_SESSAO)?.value);
   const caminho = request.nextUrl.pathname;
 
-  if (sessao === null) {
+  if (dica === null) {
     return caminho === LOGIN ? NextResponse.next() : paraOnde(request, LOGIN);
   }
 
-  if (!sessao.temPasskey) {
+  if (dica.estado === "provisoria") {
     return caminho === BIOMETRIA ? NextResponse.next() : paraOnde(request, BIOMETRIA);
   }
 

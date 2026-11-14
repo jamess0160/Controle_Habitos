@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { enviar, useRecurso, type Falha } from "@/cliente/api";
 import { useSuportaWebauthn } from "@/cliente/ambiente";
@@ -28,14 +28,23 @@ import { Botao, Campo, CLASSE_ENTRADA, Nota } from "./ui";
  * O bloqueio vem antes de tudo na ordem de render: revelar o formulário durante
  * um bloqueio por tentativas diria ao atacante que ele ainda tem o que tentar.
  *
- * **Existe um quinto estado, e ele só acontece em desenvolvimento**: passkey
- * cadastrada *e* senha ativa, os dois caminhos de entrada disponíveis. Em
- * produção os dois são mutuamente exclusivos — o cadastro da passkey desativa a
- * senha, e o reset apaga a passkey ao reativá-la. Quem decide é `APP_MODO` no
- * servidor (ver [servidor/modo.ts](../servidor/modo.ts)), e a tela avisa em
- * letras visíveis quando está nesse modo: um deploy de produção esquecido em
+ * Desde a etapa 3.1 os quatro estados vêm do banco, e os atalhos `?simular=…` da
+ * etapa 2 foram removidos: `temPasskey` sai de `credencial_passkey`, `senhaAtiva`
+ * de `credencial_senha` e `bloqueadoAte` de `tentativa_login`. Percorrer um
+ * estado agora é colocá-lo no banco, não simulá-lo na tela.
+ *
+ * **Existem dois estados a mais que a tabela não prevê.** O primeiro só acontece
+ * em desenvolvimento: passkey cadastrada *e* senha ativa, os dois caminhos
+ * disponíveis — em produção eles são mutuamente exclusivos, porque o cadastro da
+ * passkey desativa a senha e o reset apaga a passkey ao reativá-la. Quem decide é
+ * `APP_MODO` no servidor (ver [servidor/modo.ts](../servidor/modo.ts)), e a tela
+ * avisa em letras visíveis quando está nesse modo: um deploy esquecido em
  * `desenvolvimento` significa senha ativa para sempre, e esse erro não pode ser
  * silencioso.
+ *
+ * O segundo é o banco sem credencial nenhuma — sem seed, ou recém-criado. Não é
+ * estado de produção, mas é o que aparece na primeira subida do app, e sem uma
+ * mensagem a tela ficaria simplesmente vazia.
  */
 
 const PROXIMA_TELA: Record<LoginConcluido["proximoPasso"], string> = {
@@ -43,41 +52,15 @@ const PROXIMA_TELA: Record<LoginConcluido["proximoPasso"], string> = {
   dashboard: "/",
 };
 
-/**
- * Simulação de estado — **só com `APP_MODO=desenvolvimento`**.
- *
- * O stub de `GET /api/auth/estado` não tem como saber se existe passkey
- * cadastrada sem consultar o banco, então ele responde sempre o caminho do
- * primeiro acesso. Sem isto, três dos quatro estados da tabela acima seriam
- * impossíveis de ver na etapa 2 — cujo propósito é exatamente percorrer as telas
- * com dados falsos.
- *
- * Simular desliga o modo frouxo **na tela**: `com-passkey` e `sem-webauthn`
- * forçam `senhaAtiva: false`, porque é justamente o estado de produção que se
- * quer olhar. Morre na etapa 3.1, quando `temPasskey`, `senhaAtiva` e
- * `bloqueadoAte` passam a sair de `credencial_passkey` e `tentativa_login`.
- */
-const SIMULAVEIS = ["com-passkey", "sem-webauthn", "bloqueado"] as const;
-type Simulacao = (typeof SIMULAVEIS)[number];
-
-function simulacaoDe(valor: string | null, desenvolvimento: boolean): Simulacao | null {
-  if (!desenvolvimento) return null;
-  return SIMULAVEIS.find((s) => s === valor) ?? null;
-}
-
 export function TelaLogin() {
   const router = useRouter();
-  const parametros = useSearchParams();
   const { recurso, recarregar } = useRecurso<EstadoAuth>("/api/auth/estado");
 
-  const suportaDeVerdade = useSuportaWebauthn();
+  const suporta = useSuportaWebauthn();
   const agora = useAgora();
   const [falha, setFalha] = useState<Falha | null>(null);
   const [senha, setSenha] = useState("");
   const [ocupado, setOcupado] = useState(false);
-
-  /* Fixo em 9 minutos para a contagem ter o que contar sem depender do banco. */
-  const [bloqueioSimulado] = useState(() => new Date(Date.now() + 9 * 60_000).toISOString());
 
   if (recurso.estado === "carregando") {
     return <Carregando linhas={1} />;
@@ -87,22 +70,10 @@ export function TelaLogin() {
     return <Erro falha={recurso.falha} aoTentarDeNovo={() => void recarregar()} />;
   }
 
-  const desenvolvimento = recurso.dados.modoDesenvolvimento;
-  const simulacao = simulacaoDe(parametros.get("simular"), desenvolvimento);
-  const suporta = suportaDeVerdade && simulacao !== "sem-webauthn";
-
-  const estado: EstadoAuth =
-    simulacao === null
-      ? recurso.dados
-      : {
-          ...recurso.dados,
-          temPasskey: simulacao !== "bloqueado",
-          senhaAtiva: false,
-          bloqueadoAte: simulacao === "bloqueado" ? bloqueioSimulado : recurso.dados.bloqueadoAte,
-        };
-
+  const estado = recurso.dados;
   const restante = estado.bloqueadoAte === null ? "" : restanteAte(estado.bloqueadoAte, agora);
   const bloqueado = restante !== "";
+  const semCredencial = !estado.temPasskey && !estado.senhaAtiva;
 
   async function entrarComSenha(evento: React.FormEvent) {
     evento.preventDefault();
@@ -116,6 +87,11 @@ export function TelaLogin() {
     if (!r.ok) {
       setFalha(r.falha);
       setSenha("");
+      /*
+       * Recarrega o estado: a tentativa pode ter sido a quinta, e aí o que a tela
+       * tem de mostrar é a contagem do bloqueio, não o formulário de novo.
+       */
+      void recarregar();
       return;
     }
 
@@ -176,6 +152,16 @@ export function TelaLogin() {
             <strong className="font-medium tabular-nums text-texto">{restante}</strong>.
           </p>
         </div>
+      ) : semCredencial ? (
+        <Nota tom="forte">
+          <strong className="font-medium text-texto">
+            O servidor não tem credencial cadastrada.
+          </strong>{" "}
+          Rode <code className="font-mono text-texto">npm run db:seed</code> para semear a senha do
+          primeiro acesso, ou{" "}
+          <code className="font-mono text-texto">npm run cli:reset-senha</code> para gerar uma
+          provisória.
+        </Nota>
       ) : (
         <>
           {estado.temPasskey &&
@@ -248,56 +234,15 @@ export function TelaLogin() {
         </>
       )}
 
-      {desenvolvimento && <BlocoDeDesenvolvimento atual={simulacao} />}
-    </div>
-  );
-}
-
-/**
- * O aviso e os atalhos de desenvolvimento.
- *
- * O aviso não é decoração: `APP_MODO=desenvolvimento` mantém a senha ativa ao
- * lado da passkey, e se essa chave vazar para o deploy de produção o app fica
- * com uma porta a mais para sempre. A tela de login é o lugar certo para dizer
- * isso, porque é exatamente onde a porta aparece.
- */
-function BlocoDeDesenvolvimento({ atual }: { readonly atual: Simulacao | null }) {
-  const rotulos: Record<Simulacao, string> = {
-    "com-passkey": "Com passkey",
-    "sem-webauthn": "Sem WebAuthn",
-    bloqueado: "Bloqueado",
-  };
-
-  return (
-    <div className="mt-4 flex flex-col gap-3 border-t border-linha pt-4">
-      <Nota tom="forte">
-        <strong className="font-medium text-texto">
-          APP_MODO=desenvolvimento.
-        </strong>{" "}
-        A senha continua ativa mesmo com a biometria cadastrada. Em produção esta chave tem de ser{" "}
-        <code className="font-mono text-texto">producao</code> — ou ficar ausente, que dá no mesmo.
-      </Nota>
-
-      <div className="flex flex-col gap-2">
-        <p className="text-[0.68rem] uppercase tracking-widest text-texto-fraco">Simular estado</p>
-        <div className="flex flex-wrap gap-2">
-          <a
-            href="/login"
-            className={`rounded-full border px-3 py-1.5 text-xs ${atual === null ? "border-texto font-semibold" : "border-linha text-texto-fraco"}`}
-          >
-            Primeiro acesso
-          </a>
-          {SIMULAVEIS.map((chave) => (
-            <a
-              key={chave}
-              href={`/login?simular=${chave}`}
-              className={`rounded-full border px-3 py-1.5 text-xs ${atual === chave ? "border-texto font-semibold" : "border-linha text-texto-fraco"}`}
-            >
-              {rotulos[chave]}
-            </a>
-          ))}
-        </div>
-      </div>
+      {estado.modoDesenvolvimento && (
+        <Nota tom="forte">
+          <strong className="font-medium text-texto">APP_MODO=desenvolvimento.</strong> A senha
+          continua ativa mesmo com a biometria cadastrada, e a sessão dela já abre o app. Em
+          produção esta chave tem de ser{" "}
+          <code className="font-mono text-texto">producao</code> — ou ficar ausente, que dá no
+          mesmo.
+        </Nota>
+      )}
     </div>
   );
 }

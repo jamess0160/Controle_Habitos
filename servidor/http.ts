@@ -1,6 +1,7 @@
 import * as z from "zod";
 import { erroDe, STATUS_DE, validar, type CodigoErro, type Validado } from "@/contracts";
-import { sessaoAtual, type Sessao } from "./sessao";
+import { emDesenvolvimento } from "./modo";
+import { renovar, sessaoAtual, type Sessao } from "./sessao";
 
 /**
  * Plumbing dos route handlers: resposta, erro padronizado, corpo validado e o
@@ -60,29 +61,43 @@ export type Acesso = { liberado: true; sessao: Sessao } | { liberado: false; res
  * levar ao cadastro de biometria em vez de pedir a senha outra vez.
  */
 export async function exigirAcesso(): Promise<Acesso> {
-  const sessao = await sessaoAtual();
+  const acesso = await exigirSessao();
+  if (!acesso.liberado) return acesso;
 
-  if (sessao === null) {
-    return { liberado: false, resposta: falha("nao_autenticado", "Entre para continuar.") };
-  }
-
-  if (!sessao.temPasskey) {
+  /*
+   * `APP_MODO=desenvolvimento` dispensa a passkey, e este é o único lugar que
+   * decide isso. A senha é o único acesso possível num desktop sem autenticador,
+   * e prender a sessão no pedágio tornaria o app inutilizável ali — que é o que a
+   * chave existe para resolver. Em produção a regra do mapa vale inteira: não
+   * existe estado intermediário utilizável.
+   */
+  if (!acesso.sessao.temPasskey && !emDesenvolvimento()) {
     return {
       liberado: false,
       resposta: falha("conflito", "Cadastre a biometria para continuar."),
     };
   }
 
-  return { liberado: true, sessao };
+  return acesso;
 }
 
-/** Portão das rotas do próprio cadastro de biometria: exige sessão, não passkey. */
+/**
+ * Portão das rotas do próprio cadastro de biometria: exige sessão, não passkey.
+ *
+ * É também o lugar onde a sessão é renovada por uso. Aqui e não em
+ * `sessaoAtual()`: renovar escreve cookie, e o Next só permite isso em route
+ * handler ou server action — `sessaoAtual()` precisa continuar legível de
+ * qualquer lugar. A renovação só toca o banco quando falta menos de um dia,
+ * então o custo é de um `UPDATE` por dia de uso, não por requisição.
+ */
 export async function exigirSessao(): Promise<Acesso> {
   const sessao = await sessaoAtual();
 
   if (sessao === null) {
     return { liberado: false, resposta: falha("nao_autenticado", "Entre para continuar.") };
   }
+
+  await renovar(sessao);
 
   return { liberado: true, sessao };
 }

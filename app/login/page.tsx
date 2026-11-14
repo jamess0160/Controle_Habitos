@@ -1,6 +1,4 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
-import { Carregando } from "@/componentes/estado-da-tela";
 import { TelaLogin } from "@/componentes/tela-login";
 
 export const metadata: Metadata = { title: "Entrar" };
@@ -10,9 +8,9 @@ export const metadata: Metadata = { title: "Entrar" };
  * existe destino nenhum a oferecer a quem não entrou.
  *
  * A página é componente de servidor só para poder exportar `metadata`, que
- * componente de cliente não pode. O `Suspense` é obrigatório: a tela lê
- * `useSearchParams` (os atalhos de simulação da etapa 2), e sem a fronteira o
- * Next recusa a pré-renderização.
+ * componente de cliente não pode. A fronteira de `Suspense` que existia aqui saiu
+ * na etapa 3.1 junto com os atalhos `?simular=…`: era `useSearchParams` que a
+ * exigia, e sem o hook a tela volta a ser estática.
  */
 export default function LoginPage() {
   return (
@@ -22,9 +20,7 @@ export default function LoginPage() {
         <p className="mt-1 text-sm text-texto-fraco">Acompanhamento diário, só seu.</p>
       </header>
 
-      <Suspense fallback={<Carregando linhas={1} />}>
-        <TelaLogin />
-      </Suspense>
+      <TelaLogin />
     </main>
   );
 }

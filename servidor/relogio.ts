@@ -43,6 +43,32 @@ export async function hojeLogico(agora = new Date()): Promise<DataLogica> {
   return dataLogicaDe(agora, await relogioAtual());
 }
 
+/**
+ * `HH:MM:SS` na parede do fuso configurado.
+ *
+ * Pelo `Intl` e não por `getHours()`, que usaria o fuso do **processo** — num
+ * contêiner com `TZ=UTC` as 20:00 de São Paulo virariam 23:00, e nenhum registro
+ * casaria com o slot dele nem nenhum lembrete com o horário dele.
+ *
+ * Mora aqui porque três módulos precisavam da mesma conversão (materialização,
+ * dashboard e worker) e três cópias de uma conta de fuso é um erro esperando
+ * divergir.
+ */
+export function horaDeParede(instante: Date, timezone: string): string {
+  const partes = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(instante);
+
+  const valor = (tipo: Intl.DateTimeFormatPartTypes) =>
+    partes.find((p) => p.type === tipo)?.value ?? "00";
+
+  return `${valor("hour")}:${valor("minute")}:${valor("second")}`;
+}
+
 /** A saudação do dashboard, pela hora de parede — à 01:00 é "boa noite". */
 export async function saudacaoAtual(agora = new Date()) {
   const { timezone } = await relogioAtual();

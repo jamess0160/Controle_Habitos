@@ -8,6 +8,11 @@ import {
   usePermissaoDeNotificacao,
 } from "@/cliente/ambiente";
 import { enviar, useRecurso, type Falha } from "@/cliente/api";
+import {
+  assinarNoNavegador,
+  desassinarNoNavegador,
+  mensagemDeFalhaDeAssinatura,
+} from "@/cliente/push";
 import { horaCurta, instanteCurto } from "@/cliente/formato";
 import {
   CONFIRMACAO_RESET,
@@ -229,6 +234,37 @@ function Notificacoes({
   const [ocupado, setOcupado] = useState(false);
   const [mensagem, setMensagem] = useState<string | null>(null);
 
+  /**
+   * Assinar é um aperto de mão de três partes, e a ordem importa.
+   *
+   * O navegador cria a assinatura **com** a chave pública do servidor; só então
+   * o servidor pode guardá-la. Gravar primeiro e assinar depois deixaria uma
+   * linha apontando para um endpoint que talvez nunca tenha existido.
+   */
+  async function assinar() {
+    setMensagem(null);
+    setOcupado(true);
+
+    const local = await assinarNoNavegador(push.chavePublica);
+
+    if (!local.ok) {
+      setOcupado(false);
+      setMensagem(mensagemDeFalhaDeAssinatura(local));
+      return;
+    }
+
+    const r = await enviar<StatusPush>("/api/push/assinatura", "POST", local.assinatura);
+    setOcupado(false);
+
+    if (!r.ok) {
+      setMensagem(r.falha.mensagem);
+      return;
+    }
+
+    aoMudar(r.dados);
+    setMensagem("Assinatura criada. Use o teste para confirmar a entrega.");
+  }
+
   async function enviarTeste() {
     setOcupado(true);
     const r = await enviar<Ok>("/api/push/teste", "POST");
@@ -238,6 +274,9 @@ function Notificacoes({
 
   async function desassinar() {
     setOcupado(true);
+    /* Primeiro o navegador: cancelada lá, ela para de receber mesmo se o
+       servidor falhar na linha seguinte. */
+    await desassinarNoNavegador();
     const r = await enviar<StatusPush>("/api/push/assinatura", "DELETE");
     setOcupado(false);
 
@@ -283,15 +322,35 @@ function Notificacoes({
             </Botao>
           </>
         ) : (
-          <Botao disabled>Assinar</Botao>
+          <Botao
+            variante="primario"
+            disabled={ocupado || permissao !== "granted" || push.chavePublica === null}
+            onClick={() => void assinar()}
+          >
+            Assinar
+          </Botao>
         )}
       </div>
 
-      {!push.assinado && (
+      {!push.assinado && push.chavePublica === null && (
         <Nota>
-          Assinar exige a chave VAPID pública, que é gerada no deploy (etapa 5) — antes dela o
-          navegador não tem com o que montar a assinatura. A permissão acima pode ser concedida
-          desde já.
+          Assinar exige a chave VAPID pública, que o servidor ainda não tem — sem ela o navegador
+          não tem com o que montar a assinatura. Gere o par com <code>npm run push:chaves</code> e
+          rode <code>npm run db:seed</code>.
+        </Nota>
+      )}
+
+      {!push.assinado && push.chavePublica !== null && permissao !== "granted" && (
+        <Nota>
+          A permissão de notificação precisa vir antes da assinatura: é ela que autoriza o
+          navegador a receber.
+        </Nota>
+      )}
+
+      {push.assinado && push.ultimoEnvioEm === null && (
+        <Nota>
+          Assinatura gravada, mas nada foi entregue ainda. O teste acima é o que prova o caminho
+          inteiro — e, no celular, ele só vale com a PWA instalada e fechada.
         </Nota>
       )}
 

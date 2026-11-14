@@ -347,11 +347,33 @@ Isso obrigou uma correção no cálculo otimista do cliente: `comRegistro` somav
 **Fechada quando** os 26 casos de [retroativo.test.ts](../servidor/retroativo.test.ts) passam, com destaque para o cenário de estorno montado por marcações reais: seis dias de história, um congelamento a cada dois dias cumpridos, um buraco que o fechamento resgata gastando um congelamento — e o preenchimento do buraco fazendo o replay não gastar.
 
 ### 3.5 Worker e notificações
-- [ ] processo separado no compose, tick de 1 minuto
-- [ ] fechamento de período, geração do próximo, ganho de congelamento
-- [ ] push com VAPID e service worker; `lembrete`, `meta_atraso`, `congelamento_usado`, `sequencia_perdida`
-- [ ] idempotência via `notificacao_enviada`; baixa de `push_subscription` em 404/410
-- [ ] limpeza de `tentativa_login` e `webauthn_desafio`
+- [x] processo separado, tick de 1 minuto (`npm run worker`) — **o serviço no compose sai na etapa 5**, junto do Dockerfile e do cloudflared; escrevê-lo agora seria montar metade da stack duas vezes
+- [x] fechamento de período, geração do próximo, ganho de congelamento
+- [x] push com VAPID e service worker; `lembrete`, `meta_atraso`, `congelamento_usado`, `sequencia_perdida`
+- [x] idempotência via `notificacao_enviada`; baixa de `push_subscription` em 404/410
+- [x] limpeza de `tentativa_login` e `webauthn_desafio`
+
+**O worker não sabe fechar período.** Fechar é re-materializar, e a materialização é o replay de `simular()` — o `falhou`, o consumo de congelamento, o ganho e o re-encadeamento de `cada_n_dias` caem do mesmo lugar de onde já caíam quando o usuário marca. Não existe uma segunda implementação do fechamento rodando de madrugada, que é precisamente onde um erro ficaria escondido por semanas. O tique só pergunta "algum hábito está sem período que cubra hoje?" e, quando sim, re-materializa: uma consulta por hábito nos 1439 minutos em que não há nada a fazer.
+
+**A decisão de notificar é separada do envio** (`worker/notificacoes.ts` × `servidor/push.ts`), porque a decisão é toda a regra e precisa de teste com relógio injetado — um teste de notificação com relógio real passa de manhã e falha à noite. O envio mora em `servidor/` e não em `worker/` por um motivo específico: a rota de teste do push tem de percorrer **o mesmo** caminho do worker, senão ela não prova nada sobre o que entrega os lembretes de verdade.
+
+**Duas horas decididas aqui, que o mapa não fixava.** `congelamento_usado` e `sequencia_perdida` nascem na virada das 04:00 — acordar alguém àquela hora para contar que a sequência acabou é o oposto do que o aviso serve, então eles esperam as 08:00; nada se perde, porque o dashboard mostra os mesmos dois por dois dias. E `meta_atraso` cai às 20:00 quando o hábito não tem `notificar_em`: ele é o único aviso antes de perder o período, e não podia depender de um campo opcional — um hábito semanal sem lembrete perderia a semana calado. No último dia ele **substitui** o lembrete em vez de somar-se a ele: duas notificações do mesmo hábito no mesmo minuto treinam a pessoa a ignorar as duas.
+
+**A idempotência precisou mudar de chave, e isso era um bug esperando.** `notificacao_enviada.referencia_id` apontava para a linha do evento — a ocorrência, o período. Só que o replay apaga e recria essas linhas com **ids novos** a cada escrita: o lembrete das 08:00 já enviado deixaria de ser reconhecido no minuto seguinte a qualquer marcação, e o worker o reenviaria. A cada minuto. A migration `0008` troca a coluna por `referencia` em texto, descrevendo o **evento** (`<habito>|<dia>|<momento>`), que é estável por construção. Texto e não hash determinístico porque a pergunta que se faz a essa tabela é sempre "por que não notificou?", e um `SELECT` legível responde.
+
+A reserva é gravada **antes** do envio, e a inserção é a própria guarda (UNIQUE em `(tipo, referencia)`): duas execuções concorrentes não conseguem as duas inserir. O preço assumido é que um envio que falha não é tentado de novo — troca certa num app onde a mesma informação está no dashboard, porque reenviar até conseguir é o modo de uma queda de rede virar dez notificações iguais quando ela volta.
+
+**`web-push` fica preso no 3.x.** O 4.0 é uma reescrita só-ESM que não publica tipos, enquanto `@types/web-push` descreve a API do 3.x, com default export. As duas coisas juntas **compilam e quebram em execução** — foi o primeiro erro desta sub-etapa, e levou um minuto para aparecer porque o TypeScript não tinha como saber.
+
+**Um defeito de produção que o worker encontrou.** `garantirPeriodoDeHoje` pulava o hábito quando `pausado_de IS NOT NULL` — que significa "já foi pausado alguma vez", não "está pausado". As colunas guardam o intervalo e não são limpas quando a pausa simplesmente **expira** (ninguém chama "retomar" numa pausa com data de fim), então um hábito que voltou de duas semanas de férias nunca mais ganhava período: continuava no dashboard pelo último período materializado e sumia no dia seguinte, sem erro em lugar nenhum. A condição agora é "a pausa cobre hoje". Achado ao virar o dia do hábito semeado com pausa encerrada, e com teste próprio.
+
+**`GET /api/config` deixou de ser stub** junto do push, por necessidade: o botão "Assinar" precisa da chave pública VAPID, e uma fixture ali deixaria o navegador assinando para uma chave que ninguém tem. Ela vai no payload (`push.chavePublica`) em vez de um `NEXT_PUBLIC_*` pelo mesmo motivo de `estadoAuth.modoDesenvolvimento`: o valor que vale é o gravado no banco, e uma segunda fonte no bundle divergiria do par que assina de verdade.
+
+**As chaves VAPID vêm do banco, não do ambiente.** O par é a identidade do remetente: o navegador assina *para* uma chave pública específica, e o serviço de push recusa um envio assinado por outra — trocar o par invalida toda assinatura existente, em silêncio do ponto de vista de quem usa. O `.env` muda junto com o deploy; a assinatura gravada no celular não. `npm run push:chaves` gera e **imprime** o par para colar à mão, e o seed o leva para `config_app` com `ON CONFLICT DO NOTHING` — as duas coisas são a confirmação que falta num comando que, sozinho, não teria como perguntar "tem certeza?".
+
+`VAPID_SUBJECT` vazio é derivado como `https://<rp_id>`. O padrão exige um contato e ele viaja para o serviço de push a cada envio: num app de um usuário só não há endereço de suporte a oferecer, e pôr ali o e-mail do dono o entregaria ao Google, à Apple e à Mozilla em troca de nada.
+
+**Fechada quando** os 42 casos de [push.test.ts](../servidor/push.test.ts) e [tique.test.ts](../worker/tique.test.ts) passam, com destaque para os três que separam morte de instabilidade: 410 dá baixa e a assinatura para de receber; 500 e erro de rede contam falha e a assinatura continua viva. O que ainda só se prova no celular — a notificação chegando com o app fechado — é critério da etapa 4.
 
 ### 3.6 CLI
 - [ ] `cli:reset-biometria` e `cli:reset-senha`, transacionais, com confirmação interativa e senha provisória aleatória impressa uma vez

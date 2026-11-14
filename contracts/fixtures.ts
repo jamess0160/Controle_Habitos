@@ -485,6 +485,9 @@ export const statusPushFixture: StatusPush = {
   assinado: true,
   ultimoEnvioEm: "2026-11-10T09:00:00.000-03:00",
   invalidaEm: null,
+  /* Uma chave P-256 em base64url, no formato que `subscribe()` aceita. */
+  chavePublica:
+    "BJ4QZr8xL2vK9wH3nT7mQ1cR5yU0pA6sD8fG2hJ4kL6mN8pQ0rS2tU4vW6xY8zA0bC2dE4fG6hJ8kL0mN2pQ4r",
 };
 
 export const configAppFixture: ConfigApp = {

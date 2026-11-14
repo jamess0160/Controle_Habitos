@@ -10,7 +10,7 @@ import {
   simular,
 } from "@/dominio/simulacao";
 import { instanteDe, versaoDeConfig } from "@/db/mapa-dominio";
-import { hojeLogico } from "./relogio";
+import { hojeLogico, horaDeParede } from "./relogio";
 
 /**
  * Materialização: reescreve as tabelas derivadas de um hábito a partir dos
@@ -97,28 +97,6 @@ export async function registrosDe(
     criadoEm: l.criado_em,
     horario: l.previsto_para === null ? null : horaDeParede(l.previsto_para, timezone),
   }));
-}
-
-/**
- * `HH:MM:SS` na parede do fuso configurado.
- *
- * Pelo `Intl` e não por `getHours()`, que usaria o fuso do processo — num
- * contêiner com `TZ=UTC` as 20:00 de São Paulo virariam 23:00 e nenhum registro
- * casaria com o slot dele.
- */
-function horaDeParede(instante: Date, timezone: string): string {
-  const partes = new Intl.DateTimeFormat("en-GB", {
-    timeZone: timezone,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(instante);
-
-  const valor = (tipo: Intl.DateTimeFormatPartTypes) =>
-    partes.find((p) => p.type === tipo)?.value ?? "00";
-
-  return `${valor("hour")}:${valor("minute")}:${valor("second")}`;
 }
 
 export async function versoesDe(conexao: Knex, habitoId: string): Promise<VersaoConfig[]> {

@@ -287,7 +287,12 @@ Base do rate limiting, que entra já na onda 1. Em tabela, e não em memória, p
 | `p256dh` | text NOT NULL | |
 | `auth` | text NOT NULL | |
 | `criada_em` | timestamptz NOT NULL | |
+| `ultimo_envio_em` | timestamptz NULL | último envio aceito pelo push service |
 | `invalida_em` | timestamptz NULL | marcada quando o push service responde 404/410 |
+
+`ultimo_envio_em` entrou na migration `0008`: o contrato de `statusPush` promete "última vez que o endpoint aceitou um envio" desde a etapa 1 e a tela de Ajustes mostra isso, mas a coluna não existia. É o único sinal de que o push **está funcionando** — a assinatura pode estar gravada, válida e nunca ter entregue nada, e é justamente o estado em que a tela precisa dizer "use o teste".
+
+A assinatura recusada é **marcada, não apagada**: é o que separa "o push está desligado" de "o push parou de funcionar sem ninguém desligar".
 
 ### `notificacao_enviada`
 
@@ -297,10 +302,14 @@ Guarda de idempotência: o worker roda a cada minuto e não pode notificar duas 
 |---|---|---|
 | `id` | uuid PK | |
 | `tipo` | text NOT NULL | `lembrete` \| `meta_atraso` \| `congelamento_usado` \| `sequencia_perdida` |
-| `referencia_id` | uuid NOT NULL | ocorrência ou período |
+| `referencia` | text NOT NULL | identidade do **evento**: `<habito>｜<dia>｜<momento>` |
 | `enviada_em` | timestamptz NOT NULL | |
 
-- UNIQUE (`tipo`, `referencia_id`)
+- UNIQUE (`tipo`, `referencia`)
+
+**A coluna já foi `referencia_id uuid`, apontando para a ocorrência ou o período** (migration `0008`, etapa 3.5). Não sobrevivia à materialização: o replay apaga e recria `habito_periodo` e `habito_ocorrencia` com ids novos a cada escrita, então o lembrete das 08:00 já enviado deixaria de ser reconhecido no minuto seguinte a qualquer marcação, e o worker o reenviaria a cada minuto. A chave passou a descrever o evento, cujas partes — dia lógico e horário — não mudam quando as tabelas derivadas são refeitas.
+
+Texto em vez de um uuid determinístico sobre os mesmos campos porque a pergunta que se faz a esta tabela é sempre "por que não notificou?", e um `SELECT` legível responde; um hash obriga a reproduzir a derivação para descobrir a qual evento a linha se referia.
 
 ### `config_app`
 

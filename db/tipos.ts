@@ -211,11 +211,13 @@ export interface PushSubscription {
   p256dh: string;
   auth: string;
   criada_em: Date;
+  /** Último envio aceito pelo push service; nulo = nunca entregou nada. */
+  ultimo_envio_em: Date | null;
   invalida_em: Date | null;
 }
 export type PushSubscriptionInsert = ComDefault<
   PushSubscription,
-  "id" | "criada_em" | "invalida_em"
+  "id" | "criada_em" | "ultimo_envio_em" | "invalida_em"
 >;
 
 export type NotificacaoTipo =
@@ -227,7 +229,14 @@ export type NotificacaoTipo =
 export interface NotificacaoEnviada {
   id: string;
   tipo: NotificacaoTipo;
-  referencia_id: string;
+  /**
+   * Identidade do **evento**, não da linha: `<habito>|<dia>|<momento>`.
+   *
+   * Apontar para o id da ocorrência ou do período não sobreviveria à
+   * materialização, que os recria a cada escrita — o lembrete já enviado
+   * deixaria de ser reconhecido e seria reenviado a cada minuto.
+   */
+  referencia: string;
   enviada_em: Date;
 }
 export type NotificacaoEnviadaInsert = ComDefault<NotificacaoEnviada, "id" | "enviada_em">;

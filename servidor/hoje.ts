@@ -6,7 +6,7 @@ import { type DataLogica, comoDataLogica, somarDias } from "@/dominio/calendario
 import { type RelogioLogico, dataLogicaDe } from "@/dominio/dia-logico";
 import { lerConfig } from "./config";
 import { materializar } from "./materializar";
-import { hojeLogico, relogioAtual, saudacaoAtual } from "./relogio";
+import { hojeLogico, horaDeParede, relogioAtual, saudacaoAtual } from "./relogio";
 
 /**
  * `GET /api/hoje` — o dashboard.
@@ -70,26 +70,49 @@ export async function montarHoje(): Promise<Hoje> {
  * mostraria os dias recentes sem período — bloqueados, sem motivo que o usuário
  * reconheça. Duas cópias divergiriam na virada do dia, que é o único momento em
  * que isto importa.
+ *
+ * Devolve se **materializou**, e não se foi chamada: o worker relata quantos
+ * hábitos viraram o dia, e contar as chamadas faria o log dizer "4 períodos"
+ * num tique em que um deles estava pausado e nada aconteceu.
  */
 export async function garantirPeriodoDeHoje(
   habitoId: string,
   hoje: DataLogica,
   timezone: string,
   agora: Date,
-): Promise<void> {
-  if ((await periodoDeHoje(habitoId, hoje)) !== undefined) return;
+): Promise<boolean> {
+  if ((await periodoDeHoje(habitoId, hoje)) !== undefined) return false;
 
-  const pausado = await db("habito")
+  /*
+   * Pausa **que cobre hoje** não gera período, por decisão da simulação, e isso
+   * está certo.
+   *
+   * A condição já foi `pausado_de IS NOT NULL`, que é outra coisa: significava
+   * "este hábito já foi pausado alguma vez", e as colunas de pausa não são
+   * limpas na retomada — elas guardam o intervalo. Um hábito que voltou de duas
+   * semanas de férias nunca mais ganhava período: ele seguia aparecendo no
+   * dashboard pelo período do último dia materializado e sumia no dia seguinte,
+   * sem erro em lugar nenhum. Foi o worker que achou, ao virar o dia de um
+   * hábito semeado com pausa encerrada.
+   */
+  const habito = await db("habito")
     .where({ id: habitoId })
-    .whereNotNull("pausado_de")
-    .first("id");
+    .first("pausado_de", "pausado_ate");
 
-  /* Pausado não gera período por decisão da simulação, e isso está certo. */
-  if (pausado !== undefined) return;
+  if (habito === undefined) return false;
+
+  if (habito.pausado_de !== null) {
+    const cobreHoje =
+      habito.pausado_de <= hoje && (habito.pausado_ate === null || hoje <= habito.pausado_ate);
+
+    if (cobreHoje) return false;
+  }
 
   await db.transaction(async (trx) => {
     await materializar(trx, habitoId, { hoje, timezone, agora });
   });
+
+  return true;
 }
 
 /**
@@ -192,21 +215,6 @@ async function linhasDoHabito(
       concluida: concluidaDe(config, meus, registros),
     };
   });
-}
-
-function horaDeParede(instante: Date, timezone: string): string {
-  const partes = new Intl.DateTimeFormat("en-GB", {
-    timeZone: timezone,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(instante);
-
-  const valor = (tipo: Intl.DateTimeFormatPartTypes) =>
-    partes.find((p) => p.type === tipo)?.value ?? "00";
-
-  return `${valor("hour")}:${valor("minute")}:${valor("second")}`;
 }
 
 type RegistroDaLinha = {
@@ -330,8 +338,13 @@ function somar(registros: RegistroDaLinha[]): number {
  * A janela de dois dias evita que o aviso fique permanente. Sem registro de
  * leitura, é o melhor critério disponível: mais que isso e o dashboard viraria
  * um mural do mês passado.
+ *
+ * Exportada para o worker: `congelamento_usado` e `sequencia_perdida` são as
+ * mesmas duas comunicações, numa tela e num push. Calculá-las duas vezes faria a
+ * notificação dizer "restam 2" e o dashboard dizer "restam 1" no mesmo minuto —
+ * e quem lê não teria como saber qual acreditar.
  */
-async function avisosDoHabito(
+export async function avisosDoHabito(
   habitoId: string,
   habitoNome: string,
   hoje: DataLogica,

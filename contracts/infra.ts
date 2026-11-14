@@ -22,6 +22,19 @@ export const statusPush = z.object({
   ultimoEnvioEm: instante.nullable(),
   /** Marcado quando o endpoint responde 404/410 e a assinatura é baixada. */
   invalidaEm: instante.nullable(),
+  /**
+   * A chave pública VAPID, que o navegador precisa para montar a assinatura.
+   *
+   * Acréscimo da etapa 3.5: sem ela a tela não tem o que passar a
+   * `pushManager.subscribe()`, e o botão "Assinar" ficava desabilitado. Vem no
+   * payload em vez de um `NEXT_PUBLIC_*` pelo mesmo motivo de
+   * `estadoAuth.modoDesenvolvimento`: o valor que vale é o gravado no banco, e
+   * uma segunda fonte no bundle divergiria do par que assina de verdade.
+   *
+   * Pública no sentido literal — ela é enviada ao serviço de push por qualquer
+   * cliente que assine. `nula` enquanto o par não foi gerado.
+   */
+  chavePublica: z.string().nullable(),
 });
 export type StatusPush = z.infer<typeof statusPush>;
 

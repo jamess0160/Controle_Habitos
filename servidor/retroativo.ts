@@ -26,7 +26,7 @@ import {
   falhar,
   periodoDe,
 } from "./registros";
-import { hojeLogico, relogioAtual } from "./relogio";
+import { hojeLogico, horaDeParede, relogioAtual } from "./relogio";
 
 /**
  * Preenchimento retroativo — a janela de 7 dias.
@@ -342,21 +342,6 @@ async function ocorrenciasDoDia(
    * colocaria no dia errado da janela.
    */
   return todas.filter((o) => dataLogicaDe(o.previsto_para, relogio) === dataLogica);
-}
-
-function horaDeParede(instante: Date, timezone: string): string {
-  const partes = new Intl.DateTimeFormat("en-GB", {
-    timeZone: timezone,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(instante);
-
-  const valor = (tipo: Intl.DateTimeFormatPartTypes) =>
-    partes.find((p) => p.type === tipo)?.value ?? "00";
-
-  return `${valor("hour")}:${valor("minute")}:${valor("second")}`;
 }
 
 type RegistroDoDia = { id: string; dataLogica: DataLogica; valor: number };

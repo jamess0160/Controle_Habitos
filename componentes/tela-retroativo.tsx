@@ -42,6 +42,7 @@ const MOTIVO: Record<NonNullable<DiaRetroativo["motivoBloqueio"]>, string> = {
   antes_do_inicio: "antes do início do hábito",
   em_pausa: "dentro de uma pausa",
   fora_da_janela: "fora da janela de 7 dias",
+  nao_previsto: "não é dia deste hábito",
 };
 
 const MARCA_DE_ESTADO: Record<DiaRetroativo["estado"], EstadoDaMarca> = {
@@ -123,8 +124,21 @@ export function TelaRetroativo() {
       return;
     }
 
-    /* Mover a âncora de `cada_n_dias` re-encadeia tudo: isso se confirma antes. */
-    if (previa.dados.efeitos.novoVencimento !== null) {
+    /*
+     * Mover a âncora de `cada_n_dias` re-encadeia tudo: isso se confirma antes.
+     *
+     * Mas só quando ela **move**. `novoVencimento` vem preenchido em toda
+     * resposta de hábito ancorado, inclusive quando o dia preenchido não é a
+     * última conclusão e a cadeia fica onde estava — pedir confirmação ali
+     * anunciaria uma mudança que não houve, e em duas telas de uso o aviso
+     * perderia o sentido. A comparação é com o vencimento que a janela já
+     * carrega, sem mais uma ida ao servidor.
+     */
+    const move =
+      previa.dados.efeitos.novoVencimento !== null &&
+      previa.dados.efeitos.novoVencimento !== retro.periodoAtual?.fim;
+
+    if (move) {
       setOcupado(false);
       setConfirmacao({ dia, valor, efeitos: previa.dados.efeitos });
       return;
@@ -329,8 +343,25 @@ function DiaItem({
   readonly aoDesmarcar: () => void;
 }) {
   const bloqueado = dia.estado === "bloqueado";
-  const marcado = dia.estado === "cumprido";
-  const podeDesmarcar = marcado && dia.registroIds.length > 0;
+  /*
+   * O que o toque faz num dia que já tem registro depende do tipo, e as duas
+   * leituras erradas doem:
+   *
+   * - num dia **somável ainda curto** (250 de 2000 ml) o toque acrescenta, senão
+   *   não haveria como completar o dia sem antes apagar o que já estava lá;
+   * - em qualquer outro dia com registro o toque desfaz. Isso inclui o hábito
+   *   `negativo`, onde o dia com registro é a recaída: sem esta regra, tocar o
+   *   dia da escorregada registraria uma segunda.
+   */
+  const aceitaMais = pedeValor && dia.estado === "nao_cumprido";
+  const podeDesmarcar = dia.registroIds.length > 0 && !aceitaMais;
+
+  /*
+   * `valor` é nulo no hábito negativo — o `1` do registro é convenção de
+   * armazenamento, não quantidade —, então a contagem sai dos próprios ids. Sem
+   * isto o dia da escorregada ficaria idêntico ao dia limpo, mudando só a marca.
+   */
+  const recaidas = meta.tipo === "negativo" ? dia.registroIds.length : 0;
 
   function aoTocar() {
     if (bloqueado) return;
@@ -362,6 +393,7 @@ function DiaItem({
           {dia.hoje && "hoje"}
           {bloqueado && dia.motivoBloqueio !== null && MOTIVO[dia.motivoBloqueio]}
           {dia.estado === "congelado" && "congelamento usado"}
+          {recaidas > 0 && (recaidas === 1 ? "recaída" : `${recaidas} recaídas`)}
           {dia.valor !== null && `${numero(dia.valor)}${meta.tipo === "duracao" ? " min" : ""}`}
         </span>
 

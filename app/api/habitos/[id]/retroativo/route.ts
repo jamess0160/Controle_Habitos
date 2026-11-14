@@ -1,13 +1,26 @@
-import { preencherRetroativo, type RetroativoAplicado } from "@/contracts";
-import { retroativoFixture, retroativoPreviaFixture } from "@/contracts/fixtures";
-import { corpo, exigirAcesso, json } from "@/servidor/http";
+import { preencherRetroativo } from "@/contracts";
+import { corpo, exigirAcesso, falha, json } from "@/servidor/http";
+import { mensagemDeFalhaDeRegistro } from "@/servidor/registros";
+import { aplicarRetroativo, montarRetroativo } from "@/servidor/retroativo";
 
-/** GET /api/habitos/:id/retroativo — a janela de 7 dias com os bloqueios visíveis. */
-export async function GET(_req: Request, _ctx: RouteContext<"/api/habitos/[id]/retroativo">) {
+/**
+ * GET /api/habitos/:id/retroativo — a janela de 7 dias com os bloqueios visíveis.
+ *
+ * Dias bloqueados vêm na lista **com motivo**, e não ausentes: sumir com o dia
+ * deixaria a tela ambígua entre "não pode" e "não aconteceu".
+ */
+export async function GET(_req: Request, ctx: RouteContext<"/api/habitos/[id]/retroativo">) {
   const acesso = await exigirAcesso();
   if (!acesso.liberado) return acesso.resposta;
 
-  return json(retroativoFixture);
+  const { id } = await ctx.params;
+  const resultado = await montarRetroativo(id);
+
+  if (!resultado.ok) {
+    return falha("nao_encontrado", mensagemDeFalhaDeRegistro(resultado.falha));
+  }
+
+  return json(resultado.dados);
 }
 
 /**
@@ -20,20 +33,25 @@ export async function GET(_req: Request, _ctx: RouteContext<"/api/habitos/[id]/r
  * fez ao inventário de rotas, para a tela não precisar de um endpoint de
  * simulação separado.
  *
- * As duas respostas têm o mesmo shape, mudando só `persistido` — a tela usa o
- * mesmo código para a prévia e para a confirmação.
+ * As duas respostas têm o mesmo shape, mudando só `persistido` — e não só o
+ * shape: a prévia é a **mesma escrita**, numa transação desfeita no fim. A tela
+ * usa o mesmo código para as duas porque o servidor faz a mesma coisa nas duas.
  */
-export async function POST(req: Request, _ctx: RouteContext<"/api/habitos/[id]/retroativo">) {
+export async function POST(req: Request, ctx: RouteContext<"/api/habitos/[id]/retroativo">) {
   const acesso = await exigirAcesso();
   if (!acesso.liberado) return acesso.resposta;
 
   const r = await corpo(req, preencherRetroativo);
   if (!r.ok) return json(r.resposta, r.status);
 
-  const aplicado: RetroativoAplicado = {
-    ...retroativoPreviaFixture,
-    persistido: !r.dados.previa,
-  };
+  const { id } = await ctx.params;
+  const resultado = await aplicarRetroativo(id, r.dados);
 
-  return json(aplicado);
+  if (!resultado.ok) {
+    const codigo =
+      resultado.falha.tipo === "habito_inexistente" ? "nao_encontrado" : "regra_violada";
+    return falha(codigo, mensagemDeFalhaDeRegistro(resultado.falha));
+  }
+
+  return json(resultado.dados);
 }

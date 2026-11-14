@@ -5,11 +5,12 @@
  * perceba: a resposta não bate com o schema do contrato, o portão não fecha, a
  * validação de entrada não está ligada.
  *
- * Hábitos (3.2) e autenticação (3.1) já são reais e têm suíte própria —
- * [habitos.test.ts](habitos.test.ts) e [autenticacao.test.ts](autenticacao.test.ts).
- * O que sobra de fixture aqui é o retroativo, o push e a exportação, que são as
- * etapas 3.4 e 3.5; para essas, a conformidade com o
- * contrato é o que garante que a tela construída em cima do stub continue
+ * Autenticação (3.1), hábitos (3.2), registro (3.3) e retroativo (3.4) já são
+ * reais e têm suíte própria — [autenticacao.test.ts](autenticacao.test.ts),
+ * [habitos.test.ts](habitos.test.ts), [registros.test.ts](registros.test.ts) e
+ * [retroativo.test.ts](retroativo.test.ts). O que sobra de fixture aqui é o push
+ * e a exportação, que são as etapas 3.5 e a onda 2; para essas, a conformidade
+ * com o contrato é o que garante que a tela construída em cima do stub continue
  * valendo quando o stub sair.
  */
 
@@ -63,6 +64,7 @@ import {
 } from "./apoio-de-teste";
 import { COOKIE_SESSAO } from "./cookie-sessao";
 import { criarHabitoNoBanco } from "./habitos";
+import { hojeLogico } from "./relogio";
 
 import { GET as authEstado } from "@/app/api/auth/estado/route";
 import { POST as authRegistroOpcoes } from "@/app/api/auth/webauthn/registro/opcoes/route";
@@ -138,9 +140,15 @@ function ctxDe(id: string) {
   return { params: Promise.resolve({ id }) };
 }
 
-/** Hoje pelo relógio do servidor — a pausa exige dia lógico, não `new Date()`. */
-function hojeDeTeste(): string {
-  return new Date().toISOString().slice(0, 10);
+/**
+ * Hoje pelo relógio **lógico** do servidor, não por `new Date()`.
+ *
+ * A pausa e o retroativo trabalham em dia lógico, e entre as 21:00 e a meia-noite
+ * de São Paulo o `toISOString()` já está no dia seguinte — a data viraria futuro
+ * e a rota recusaria com razão. É a armadilha nº 1 alcançando o próprio teste.
+ */
+async function hojeDeTeste(): Promise<string> {
+  return hojeLogico();
 }
 
 /* Dicas de cookie para os testes do proxy, que não tocam o banco. */
@@ -293,14 +301,20 @@ describe("todo stub responde o que o contrato promete", () => {
     [
       "POST /api/habitos/:id/pausa",
       habito,
-      (id) => pausaPost(post({ de: hojeDeTeste(), ate: null }), ctxDe(id)),
+      async (id) => pausaPost(post({ de: await hojeDeTeste(), ate: null }), ctxDe(id)),
     ],
     ["POST /api/habitos/:id/arquivo", habito, (id) => arquivoPost(post({}), ctxDe(id))],
-    ["GET /api/habitos/:id/retroativo", retroativo, () => retroativoGet(post({}), ctxId)],
+    ["GET /api/habitos/:id/retroativo", retroativo, (id) => retroativoGet(post({}), ctxDe(id))],
     [
       "POST /api/habitos/:id/retroativo",
       retroativoAplicado,
-      () => retroativoPost(post({ dataLogica: "2026-11-09" }), ctxId),
+      /*
+       * Hoje, e não uma data fixa: o hábito é criado agora, então qualquer dia
+       * anterior cai antes do `inicio_em` e não tem período onde pendurar o
+       * registro. Os casos de janela moram em [retroativo.test.ts](retroativo.test.ts),
+       * que envelhece o hábito para poder preencher o passado.
+       */
+      async (id) => retroativoPost(post({ dataLogica: await hojeDeTeste() }), ctxDe(id)),
     ],
     ["GET /api/config", configApp, () => configGet()],
     ["PATCH /api/config", configApp, () => configPatch(post({ horaVirada: "05:00:00" }))],
@@ -414,14 +428,6 @@ describe("validação ligada nas rotas que escrevem", () => {
     expect(res.status).toBe(404);
     const corpo: RespostaErro = await res.json();
     expect(corpo.erro.codigo).toBe("nao_encontrado");
-  });
-
-  it("a prévia do retroativo não persiste, e a confirmação persiste", async () => {
-    const previa = await retroativoPost(post({ dataLogica: "2026-11-09", previa: true }), ctxId);
-    expect((await previa.json()).persistido).toBe(false);
-
-    const confirmado = await retroativoPost(post({ dataLogica: "2026-11-09" }), ctxId);
-    expect((await confirmado.json()).persistido).toBe(true);
   });
 
 });

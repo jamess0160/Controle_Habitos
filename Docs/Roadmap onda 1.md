@@ -71,7 +71,7 @@ Funções puras, sem I/O e sem `new Date()` interno — **o instante atual entra
 
 A escolha resolve de graça o problema mais delicado do domínio. Como `cada_n_dias` é ancorado na última conclusão, um preenchimento retroativo move o início de todos os períodos seguintes — não existe "corrigir o período afetado", existe reencadear. Um replay puro reencadeia por construção, e o estorno de congelamento deixa de ser uma operação: na nova execução aquele congelamento simplesmente não é consumido. A camada de persistência compara o resultado com o que está no banco e escreve a diferença (etapa 3.4).
 
-Dois pontos ficaram deliberadamente fora do domínio puro, porque são de persistência: **qual** linha de `congelamento` é consumida (FIFO por `ganho_em`, decidido no repositório — o domínio só conta o estoque) e o registro de `estornado_em` nas linhas afetadas.
+Um ponto ficou deliberadamente fora do domínio puro, porque é de persistência: **qual** linha de `congelamento` é consumida (FIFO por `ganho_em`, decidido no repositório — o domínio só conta o estoque). O segundo ponto que estava previsto aqui, gravar `estornado_em` nas linhas afetadas, não sobreviveu ao encontro com a materialização: a coluna foi removida na etapa 3.4 — ver a nota em [Mapa do banco](mapas/Mapa%20do%20banco.md).
 
 **Fechada quando** os casos difíceis passam: registro à 01:30 contando para o dia anterior, conclusão antecipada em `cada_n_dias` encurtando o período, retroativo re-encadeando a cadeia, congelamento esgotado levando a `falhou`, pausa de 20 dias não gerando vencimento estourado.
 
@@ -328,9 +328,23 @@ Isso obrigou uma correção no cálculo otimista do cliente: `comRegistro` somav
 **O cronômetro não mudou:** ele foi escrito na etapa 2.3 com `iniciado_em` no `sessionStorage` e tempo por diferença de relógio, como o mapa exige. O que a 3.3 fechou foi o outro lado — `origem: "cronometro"` chega ao banco e tem teste.
 
 ### 3.4 Retroativo
-- [ ] janela de 7 dias, marcar e desmarcar, bloqueios visíveis com motivo
-- [ ] recálculo de sequência e estorno de congelamento
-- [ ] re-encadeamento de `cada_n_dias` com o novo vencimento mostrado antes de confirmar
+- [x] janela de 7 dias, marcar e desmarcar, bloqueios visíveis com motivo
+- [x] recálculo de sequência e estorno de congelamento
+- [x] re-encadeamento de `cada_n_dias` com o novo vencimento mostrado antes de confirmar
+
+**A prévia é a escrita, desfeita.** `previa: true` roda exatamente o mesmo caminho do preenchimento, numa transação que termina em rollback — a resposta é montada dentro dela e sai por uma sentinela de erro. A alternativa era calcular a prévia com uma simulação à parte, sem tocar o banco; seria uma segunda implementação do efeito, e a tela estaria pedindo confirmação de um número que o caminho real não produz. Aqui o que ela mostra antes de confirmar é o resultado medido do que vai acontecer, e o teste compara os dois campo a campo.
+
+**Um defeito que só o banco real mostrou.** `novoVencimento` vem preenchido em **toda** resposta de hábito ancorado, não só quando a âncora se move: preencher um dia que não é a última conclusão deixa a cadeia onde estava. A tela pedia confirmação nos dois casos, anunciando "o próximo vencimento passa a ser 16/11" quando ele já era 16/11 — e um aviso que aparece sempre deixa de ser aviso justamente antes do caso em que ele importa. A tela agora compara com o `periodoAtual.fim` que a janela já carrega, sem ida extra ao servidor. Conferido nos dois sentidos: preencher 12/11 não move (não pergunta), preencher 14/11 move 16/11 → 17/11 (pergunta).
+
+**Um quarto motivo de bloqueio, `nao_previsto`.** No modo fixo, um dia fora de `dias_semana`/`dias_mes` não tem momento devido, e nenhum dos três motivos anteriores o descrevia. As duas alternativas eram piores: `bloqueado` sem motivo deixa a tela sem explicação, e `nao_cumprido` diz que o dia foi perdido quando ele nunca foi cobrado. Na Vitamina D semeada, quatro dos sete dias da janela são esse caso.
+
+**O que o toque faz num dia já registrado depende do tipo**, e as duas leituras erradas doem. Num dia somável ainda curto (250 de 2000 ml) o toque **acrescenta**, senão não haveria como completar o dia sem antes apagar o que já estava lá. Em qualquer outro dia com registro ele **desfaz** — e isso inclui o hábito negativo, onde o dia com registro é a recaída: sem a regra, tocar o dia da escorregada registraria uma segunda. No negativo o dia limpo é o cumprido, a recaída é um evento só (não um por horário) e a contagem aparece como "recaída"/"N recaídas", porque `valor` é nulo ali: o `1` do registro é convenção de armazenamento, não quantidade.
+
+**No modo fixo, preencher o dia preenche os momentos do dia que faltavam.** A tela é por dia e manda só a data; preencher o primeiro momento deixaria um dia de duas doses eternamente a meio sem que a tela tivesse como dizer qual falta, e preencher todos duplicaria registro nos já cumpridos. O `horario` do contrato continua aceito e tem precedência — é o que permite, sem mudar o servidor, uma tela futura que abra o dia em momentos.
+
+**`congelamento.estornado_em` foi removida** (migration `0007`). Ela supunha que estorno fosse um evento numa linha; com a materialização como replay, o estoque inteiro é apagado e recriado a cada escrita, com ids novos, e não existe a linha de antes para carimbar. Estorno é a diferença entre dois recálculos — "o total consumido diminuiu" —, que é como `efeitos.congelamentoEstornado` chega à tela. A coluna nunca recebeu outro valor senão `null` e os três `whereNull("estornado_em")` eram filtros que não filtravam nada. Ver a nota no [Mapa do banco](mapas/Mapa%20do%20banco.md).
+
+**Fechada quando** os 26 casos de [retroativo.test.ts](../servidor/retroativo.test.ts) passam, com destaque para o cenário de estorno montado por marcações reais: seis dias de história, um congelamento a cada dois dias cumpridos, um buraco que o fechamento resgata gastando um congelamento — e o preenchimento do buraco fazendo o replay não gastar.
 
 ### 3.5 Worker e notificações
 - [ ] processo separado no compose, tick de 1 minuto

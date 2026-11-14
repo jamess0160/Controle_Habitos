@@ -70,7 +70,22 @@ export type RegistroCriado = z.infer<typeof registroCriado>;
 
 // ─── Retroativo ──────────────────────────────────────────────────────────────
 
-export const MOTIVO_BLOQUEIO = ["antes_do_inicio", "em_pausa", "fora_da_janela"] as const;
+/**
+ * Por que um dia da janela não aceita marcação.
+ *
+ * `nao_previsto` é acréscimo da etapa 3.4, encontrado montando a tela contra o
+ * banco: num hábito de modo **fixo**, um dia que não está em `diasSemana` ou
+ * `diasMes` não tem momento devido — não há o que marcar ali. Os três motivos
+ * anteriores não descreviam isso, e as duas alternativas eram piores: `bloqueado`
+ * sem motivo deixaria a tela sem explicação, e `nao_cumprido` diria que o dia foi
+ * perdido quando ele nunca foi cobrado.
+ */
+export const MOTIVO_BLOQUEIO = [
+  "antes_do_inicio",
+  "em_pausa",
+  "fora_da_janela",
+  "nao_previsto",
+] as const;
 export const motivoBloqueio = z.enum(MOTIVO_BLOQUEIO);
 
 /**

@@ -623,7 +623,6 @@ async function semear(
         ? instanteDe(somarDias(consumidor.periodo.fim, 1), "04:00:00")
         : null,
       consumido_periodo_id: consumidor?.id ?? null,
-      estornado_em: null,
     });
   }
 

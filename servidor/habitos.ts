@@ -50,7 +50,6 @@ async function montar(conexao: Knex, habitoId: string): Promise<Habito | null> {
 
   const [{ count }] = await conexao("congelamento")
     .where({ habito_id: habitoId, status: "disponivel" })
-    .whereNull("estornado_em")
     .count({ count: "*" });
 
   const doContrato = configDoContrato(config);

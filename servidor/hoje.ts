@@ -65,8 +65,13 @@ export async function montarHoje(): Promise<Hoje> {
  *
  * Quando o worker existir isto continua, como rede: ele pode estar parado, e a
  * conta é uma consulta quando não há nada a fazer.
+ *
+ * Exportada porque o retroativo precisa da mesma garantia: a janela de 7 dias
+ * mostraria os dias recentes sem período — bloqueados, sem motivo que o usuário
+ * reconheça. Duas cópias divergiriam na virada do dia, que é o único momento em
+ * que isto importa.
  */
-async function garantirPeriodoDeHoje(
+export async function garantirPeriodoDeHoje(
   habitoId: string,
   hoje: DataLogica,
   timezone: string,
@@ -132,7 +137,6 @@ async function linhasDoHabito(
   const streak = await db("habito_streak").where({ habito_id: habito.id }).first();
   const [{ congelados }] = await db("congelamento")
     .where({ habito_id: habito.id, status: "disponivel" })
-    .whereNull("estornado_em")
     .count({ congelados: "*" });
 
   const comum = {
@@ -343,7 +347,6 @@ async function avisosDoHabito(
 
   const [{ restantes }] = await db("congelamento")
     .where({ habito_id: habitoId, status: "disponivel" })
-    .whereNull("estornado_em")
     .count({ restantes: "*" });
 
   const avisos: Aviso[] = [];

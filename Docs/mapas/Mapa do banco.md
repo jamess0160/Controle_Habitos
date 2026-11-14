@@ -179,7 +179,7 @@ Evento bruto: o que você de fato fez (ou, em hábito `negativo`, a recaída). D
 
 ### `congelamento`
 
-Estoque unitário: uma linha por congelamento, não um contador. Isso dá rastro de quando foi ganho, gasto e estornado, e permite consumo FIFO.
+Estoque unitário: uma linha por congelamento, não um contador. Isso dá rastro de quando foi ganho e em que período foi gasto, e permite consumo FIFO.
 
 | Coluna | Tipo | Notas |
 |---|---|---|
@@ -190,9 +190,10 @@ Estoque unitário: uma linha por congelamento, não um contador. Isso dá rastro
 | `ganho_por_periodo_id` | uuid FK → `habito_periodo` | período que fechou a sequência do ganho |
 | `consumido_em` | timestamptz NULL | preenchido automaticamente no fechamento |
 | `consumido_periodo_id` | uuid FK → `habito_periodo` NULL | |
-| `estornado_em` | timestamptz NULL | volta a `disponivel` |
 
 - índice parcial em (`habito_id`, `ganho_em`) WHERE `status = 'disponivel'` — estoque e escolha do FIFO
+
+**`estornado_em` existiu e foi removida** (migration `0007`, etapa 3.4). Ela supunha que estorno fosse um evento numa linha: o congelamento tinha sido gasto, o retroativo resgatava o período, e a linha era carimbada de volta. Com a materialização como replay isso é impossível de escrever e desnecessário de guardar — a cada escrita o estoque inteiro é apagado e recriado a partir de `simular()`, com ids novos, e não há a linha de antes para carimbar. Estorno virou a diferença entre dois recálculos ("o total consumido diminuiu"), que é como `efeitos.congelamentoEstornado` chega à tela. Enquanto existiu, nunca recebeu outro valor senão `null`, e os `whereNull("estornado_em")` das consultas de estoque eram filtros que não filtravam nada.
 
 ### `habito_streak`
 

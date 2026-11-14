@@ -27,7 +27,10 @@ export type FalhaDeRegistro =
   | { tipo: "fora_da_janela"; dias: number }
   | { tipo: "sem_periodo"; dataLogica: DataLogica }
   | { tipo: "ocorrencia_invalida" }
-  | { tipo: "registro_inexistente" };
+  | { tipo: "registro_inexistente" }
+  /* As duas do retroativo: dia sem momento devido, e dia que já está fechado. */
+  | { tipo: "dia_nao_previsto" }
+  | { tipo: "dia_ja_cumprido" };
 
 /** Janela retroativa do mapa de regras: 7 dias, incluindo hoje. */
 export const JANELA_RETROATIVA = 7;
@@ -48,6 +51,10 @@ export function mensagemDeFalhaDeRegistro(falha: FalhaDeRegistro): string {
       return "O momento informado não pertence a este hábito.";
     case "registro_inexistente":
       return "Registro não encontrado.";
+    case "dia_nao_previsto":
+      return "Este dia não é dia deste hábito.";
+    case "dia_ja_cumprido":
+      return "Este dia já está cumprido.";
   }
 }
 
@@ -197,7 +204,7 @@ export async function apagarRegistroNoBanco(
 
 // ─── Guardas ─────────────────────────────────────────────────────────────────
 
-function falhar(falha: FalhaDeRegistro) {
+export function falhar(falha: FalhaDeRegistro) {
   return { ok: false as const, falha };
 }
 
@@ -208,7 +215,7 @@ function falhar(falha: FalhaDeRegistro) {
  * mapa de regras — não há prazo de resgate nem estado `em_risco`. Fora dela, a
  * resposta é recusa com motivo, não silêncio.
  */
-async function conferirHabito(
+export async function conferirHabito(
   conexao: Knex,
   habitoId: string,
   dataLogica: DataLogica,
@@ -246,7 +253,7 @@ function diasEntre(de: string, ate: string): number {
   return Math.round(ms / 86_400_000);
 }
 
-async function periodoDe(conexao: Knex, habitoId: string, dataLogica: DataLogica) {
+export async function periodoDe(conexao: Knex, habitoId: string, dataLogica: DataLogica) {
   return conexao("habito_periodo")
     .where({ habito_id: habitoId })
     .where("inicio", "<=", dataLogica)
@@ -296,7 +303,7 @@ async function ocorrenciaDoRegistro(conexao: Knex, registroId: string): Promise<
  * naquela data e re-encadeia os seguintes, então o próximo vencimento mudou de
  * lugar. Nas outras cadências o vencimento é do calendário e não há o que contar.
  */
-function efeitosDe(
+export function efeitosDe(
   resultado: ResultadoSimulacao,
   configs: VersaoConfig[],
   dataLogica: DataLogica,
@@ -354,7 +361,7 @@ function proximoVencimento(
 }
 
 /** Congelamentos já gastos, antes da escrita — a referência do estorno. */
-async function consumidosDe(conexao: Knex, habitoId: string): Promise<number> {
+export async function consumidosDe(conexao: Knex, habitoId: string): Promise<number> {
   const [{ total }] = await conexao("congelamento")
     .where({ habito_id: habitoId, status: "consumido" })
     .count({ total: "*" });

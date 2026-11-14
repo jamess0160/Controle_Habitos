@@ -126,11 +126,10 @@ export interface Congelamento {
   ganho_por_periodo_id: string;
   consumido_em: Date | null;
   consumido_periodo_id: string | null;
-  estornado_em: Date | null;
 }
 export type CongelamentoInsert = ComDefault<
   Congelamento,
-  "id" | "status" | "ganho_em" | "consumido_em" | "consumido_periodo_id" | "estornado_em"
+  "id" | "status" | "ganho_em" | "consumido_em" | "consumido_periodo_id"
 >;
 
 export interface HabitoStreak {

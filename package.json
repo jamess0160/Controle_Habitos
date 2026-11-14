@@ -17,6 +17,8 @@
     "db:reset": "tsx db/cli.ts reset",
     "worker": "tsx worker/index.ts",
     "push:chaves": "tsx cli/vapid.ts",
+    "cli:reset-biometria": "tsx cli/reset-biometria.ts",
+    "cli:reset-senha": "tsx cli/reset-senha.ts",
     "test": "jest",
     "test:watch": "jest --watch"
   },

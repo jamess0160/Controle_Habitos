@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import type { Knex } from "knex";
 import { cookies } from "next/headers";
 import { db } from "@/db/knex";
 import {
@@ -201,6 +202,6 @@ export async function fecharSessao(): Promise<void> {
  * credencial de acesso mudou, então nenhuma sessão aberta sob a credencial
  * antiga continua valendo.
  */
-export async function revogarTodasAsSessoes(): Promise<number> {
-  return db("sessao").whereNull("revogada_em").update({ revogada_em: new Date() });
+export async function revogarTodasAsSessoes(conexao: Knex = db): Promise<number> {
+  return conexao("sessao").whereNull("revogada_em").update({ revogada_em: new Date() });
 }

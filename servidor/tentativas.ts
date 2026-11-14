@@ -1,3 +1,4 @@
+import type { Knex } from "knex";
 import { db } from "@/db/knex";
 
 /**
@@ -91,7 +92,13 @@ export async function esperar(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Usada pelo reset: um bloqueio herdado não pode trancar a senha nova. */
-export async function limparTentativas(): Promise<void> {
-  await db("tentativa_login").delete();
+/**
+ * Usada pelo reset: um bloqueio herdado não pode trancar a senha nova.
+ *
+ * Recebe a conexão para a CLI poder rodar isto na **mesma** transação em que
+ * apaga as passkeys e grava a senha provisória — um reset parcial deixaria o app
+ * sem porta nenhuma.
+ */
+export async function limparTentativas(conexao: Knex = db): Promise<void> {
+  await conexao("tentativa_login").delete();
 }

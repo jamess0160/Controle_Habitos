@@ -376,7 +376,21 @@ A reserva é gravada **antes** do envio, e a inserção é a própria guarda (UN
 **Fechada quando** os 42 casos de [push.test.ts](../servidor/push.test.ts) e [tique.test.ts](../worker/tique.test.ts) passam, com destaque para os três que separam morte de instabilidade: 410 dá baixa e a assinatura para de receber; 500 e erro de rede contam falha e a assinatura continua viva. O que ainda só se prova no celular — a notificação chegando com o app fechado — é critério da etapa 4.
 
 ### 3.6 CLI
-- [ ] `cli:reset-biometria` e `cli:reset-senha`, transacionais, com confirmação interativa e senha provisória aleatória impressa uma vez
+- [x] `cli:reset-biometria` e `cli:reset-senha`, transacionais, com confirmação interativa e senha provisória aleatória impressa uma vez
+
+**A transação é o ponto inteiro do `reset-biometria`.** São quatro escritas — apaga `credencial_passkey`, grava senha provisória com `ativa = true`, revoga as sessões, limpa `tentativa_login` — e um reset **parcial** é pior que nenhum: passkey apagada sem senha gravada deixa o app sem porta nenhuma, e a recuperação passa a exigir SQL à mão no homelab. O caso tem teste próprio, com falha simulada no meio: a passkey volta, o hash antigo volta, e o estado inativo da senha volta.
+
+**`reset-senha` não toca nas passkeys nem nas sessões**, e é a diferença inteira entre os dois. Quem perdeu a senha provisória antes de usá-la não necessariamente perdeu o aparelho; derrubar as sessões abertas transformaria um aperto pequeno num grande. Quando existe passkey cadastrada ele **avisa** que gerar a senha reativa a segunda porta até o próximo cadastro de biometria desativá-la, e a palavra de confirmação muda nesse caso (`REATIVAR` em vez de `GERAR`) — ela não pode ser a mesma que se digita no caminho rotineiro.
+
+**A confirmação é a palavra escrita, não `s/n`.** Digitar `s` por reflexo é fácil, e o preço de errar é a senha da única porta sendo trocada sem querer. Sem terminal interativo a CLI **recusa** em vez de assumir um default: `stdin` fechado devolveria `null`, que uma comparação com a palavra recusaria em silêncio e faria a ferramenta parecer quebrada. Para automação existe `--sim`, explícito e registrado no log.
+
+**A senha é gerada, nunca passada por argumento** — `--senha minhasenha` ficaria no histórico do shell e no `ps` de quem estivesse na máquina. Ela sai aleatória no formato do mapa (`XXXX-XXXX-XXXX-XXXX`, sem `O/0`, `I/1`, `S/5`, `L`, porque é ditada por telefone e digitada à mão), é impressa uma vez numa moldura que não se perde na rolagem, e some do mundo em texto claro no instante seguinte.
+
+O log é o `stdout`: num contêiner do compose é o que `docker logs` guarda com data e hora. Um arquivo dentro do contêiner desapareceria no próximo `up`.
+
+**Conferido de ponta a ponta contra o banco de desenvolvimento**, não só por teste: o `reset-biometria` apagou a passkey semeada, zerou as três tentativas e a sessão viva, e a senha impressa entrou pelo `POST /api/auth/senha` na primeira tentativa; o `reset-senha` com passkey presente preservou as duas (`passkeys_preservadas 1`, `sessoes_preservadas 1`).
+
+**Fechada quando** os 10 casos de [reset.test.ts](../cli/reset.test.ts) passam. A casca interativa — `confirmar` e `imprimirSenha` — é verificada à mão: ela só lê do terminal e imprime, e um teste dela testaria o `readline`.
 
 ### 3.7 Testes (Jest)
 - [ ] configuração via `next/jest`

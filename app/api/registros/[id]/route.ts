@@ -1,24 +1,28 @@
-import { registroRemovidoFixture } from "@/contracts/fixtures";
-import { exigirAcesso, json } from "@/servidor/http";
+import type { RegistroRemovido } from "@/contracts";
+import { exigirAcesso, falha, json } from "@/servidor/http";
+import { apagarRegistroNoBanco, mensagemDeFalhaDeRegistro } from "@/servidor/registros";
 
 /**
  * DELETE /api/registros/:id — desmarcar.
  *
  * Devolve os mesmos efeitos de uma marcação porque apagar um registro recalcula
  * a sequência, pode estornar um congelamento e, em `cada_n_dias`, mover o
- * vencimento. O estorno com a escrita de `estornado_em` é a etapa 3.4.
+ * vencimento. Sem o payload dizer, a tela teria de recarregar tudo.
  *
- * Esta rota tem agora dois chamadores: o retroativo e o próprio dashboard, que
- * desfaz o último registro do dia pelo id que vem em `linha.ultimoRegistro`.
- *
- * O stub continua devolvendo a fixture inteira, e aqui isso **não** faz a tela
- * parecer quebrada: o quanto desfazer o dashboard já sabe — é o `valor` que ele
- * tinha em mãos antes de chamar —, e o que vem daqui são só os `efeitos`, que
- * são justamente a parte derivada que a etapa 3.4 vai calcular.
+ * Dois chamadores: o retroativo e o próprio dashboard, que desfaz o último
+ * registro do dia pelo id que vem em `linha.ultimoRegistro`.
  */
-export async function DELETE(_req: Request, _ctx: RouteContext<"/api/registros/[id]">) {
+export async function DELETE(_req: Request, ctx: RouteContext<"/api/registros/[id]">) {
   const acesso = await exigirAcesso();
   if (!acesso.liberado) return acesso.resposta;
 
-  return json(registroRemovidoFixture);
+  const { id } = await ctx.params;
+  const resultado = await apagarRegistroNoBanco(id);
+
+  if (!resultado.ok) {
+    return falha("nao_encontrado", mensagemDeFalhaDeRegistro(resultado.falha));
+  }
+
+  const removido: RegistroRemovido = { efeitos: resultado.dados.efeitos };
+  return json(removido);
 }

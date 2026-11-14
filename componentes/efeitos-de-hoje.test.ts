@@ -123,6 +123,38 @@ describe("marcar", () => {
     expect(depois.concluida).toBe(false);
   });
 
+  it("no fixo com meta somável o incremento fica só na ocorrência tocada", () => {
+    /*
+     * O único caso em que a distinção entre progresso de período e de interação
+     * aparece — e o caso em que errar some: somar nas duas linhas mostraria
+     * 700 ml em cada dose quando foram 700 em uma. O servidor acumula por
+     * interação (`servidor/hoje.ts`), e as duas contas têm de concordar.
+     */
+    const somavel = (base: LinhaDeHoje): LinhaDeHoje => ({
+      ...base,
+      concluida: false,
+      ultimoRegistro: null,
+      progresso: { tipo: "quantificado", acumulado: 0, meta: 1000, unidade: "ml" },
+    });
+
+    const duas: Hoje = {
+      ...hojeFixture,
+      linhas: [somavel(vitaminaManha()), somavel(vitaminaNoite())],
+    };
+
+    const tocada = duas.linhas[0];
+    const resultado = comRegistro(
+      duas,
+      tocada,
+      criado({ habitoId: tocada.habitoId, ocorrenciaId: tocada.ocorrenciaId, valor: 700 }),
+    );
+
+    expect(resultado.linhas[0].progresso).toMatchObject({ acumulado: 700 });
+    expect(resultado.linhas[1].progresso).toMatchObject({ acumulado: 0 });
+    /* Mas a sequência, que é do hábito, move nas duas. */
+    expect(resultado.linhas[1].sequencia).toBe(efeitos.sequencia.atual);
+  });
+
   it("não encosta nas linhas dos outros hábitos", () => {
     const tocada = agua();
     const resultado = comRegistro(hojeFixture, tocada, criado({ habitoId: tocada.habitoId }));

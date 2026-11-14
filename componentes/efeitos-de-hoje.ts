@@ -45,11 +45,28 @@ export function concluidaDe(progresso: Progresso, temRegistro: boolean): boolean
   }
 }
 
+/**
+ * De quem é o progresso: do período ou da interação.
+ *
+ * `binario` conta unidades cumpridas no **período**, e `negativo` conta recaídas
+ * no período — os dois são compartilhados, então marcar a dose da manhã move o
+ * número exibido na linha da noite. Já `quantificado` e `duracao` acumulam **por
+ * interação**: cada ocorrência tem a sua soma contra a meta de uma unidade.
+ *
+ * A distinção importa num caso só, hábito fixo com meta somável, e é justamente o
+ * caso em que errar some: somar o incremento nas duas linhas mostraria 1400 ml em
+ * cada dose quando foram 700 em uma.
+ */
+function progressoDoPeriodo(progresso: Progresso): boolean {
+  return progresso.tipo === "binario" || progresso.tipo === "negativo";
+}
+
 /** Redesenha as linhas depois de `POST /api/registros`. */
 export function comRegistro(hoje: Hoje, tocada: LinhaDeHoje, criado: RegistroCriado): Hoje {
   return mapearHabito(hoje, tocada, (linha) => {
-    const progresso = avancar(linha.progresso, criado.valor);
     const tocadaAqui = linha.ocorrenciaId === tocada.ocorrenciaId;
+    const move = tocadaAqui || progressoDoPeriodo(linha.progresso);
+    const progresso = move ? avancar(linha.progresso, criado.valor) : linha.progresso;
 
     return {
       ...linha,
@@ -79,8 +96,9 @@ export function semRegistro(
   efeitos: Efeitos,
 ): Hoje {
   return mapearHabito(hoje, tocada, (linha) => {
-    const progresso = retroceder(linha.progresso, registro.valor);
     const tocadaAqui = linha.ocorrenciaId === tocada.ocorrenciaId;
+    const move = tocadaAqui || progressoDoPeriodo(linha.progresso);
+    const progresso = move ? retroceder(linha.progresso, registro.valor) : linha.progresso;
 
     return {
       ...linha,

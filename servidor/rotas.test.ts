@@ -7,8 +7,8 @@
  *
  * Hábitos (3.2) e autenticação (3.1) já são reais e têm suíte própria —
  * [habitos.test.ts](habitos.test.ts) e [autenticacao.test.ts](autenticacao.test.ts).
- * O que sobra de fixture aqui é o dashboard, o registro, o retroativo, o push e
- * a exportação, que são as etapas 3.3 a 3.5; para essas, a conformidade com o
+ * O que sobra de fixture aqui é o retroativo, o push e a exportação, que são as
+ * etapas 3.4 e 3.5; para essas, a conformidade com o
  * contrato é o que garante que a tela construída em cima do stub continue
  * valendo quando o stub sair.
  */
@@ -46,8 +46,6 @@ import {
   habito,
   hoje,
   listaDeHabitos,
-  registroCriado,
-  registroRemovido,
   retroativo,
   retroativoAplicado,
   statusPush,
@@ -304,8 +302,6 @@ describe("todo stub responde o que o contrato promete", () => {
       retroativoAplicado,
       () => retroativoPost(post({ dataLogica: "2026-11-09" }), ctxId),
     ],
-    ["POST /api/registros", registroCriado, () => registrosPost(post({ habitoId: ID, valor: 700 }))],
-    ["DELETE /api/registros/:id", registroRemovido, () => registroDelete(post({}), ctxId)],
     ["GET /api/config", configApp, () => configGet()],
     ["PATCH /api/config", configApp, () => configPatch(post({ horaVirada: "05:00:00" }))],
     ["GET /api/exportar", exportacao, () => exportar()],

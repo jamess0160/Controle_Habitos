@@ -303,9 +303,29 @@ Durante o arraste a lista do recurso não é tocada: um `definir()` por quadro r
 **O item do formulário já estava feito** desde a etapa 2.3 — ele valida com `validar(criarHabito, …)`, o mesmo schema da rota, e usa `campos[].campo` para pular ao passo do campo errado. A 3.2 não mexeu nele; a caixa estava aberta porque a rota do outro lado era stub.
 
 ### 3.3 Registro e dashboard
-- [ ] `GET /api/hoje` real, uma linha por interação devida
-- [ ] marcação por tipo: binário, incremento quantificado, recaída negativa
-- [ ] cronômetro de `duracao`: `iniciado_em` em `sessionStorage`, tempo por diferença de relógio, **nunca acumulado por `setInterval`** (o navegador estrangula timers em segundo plano e a conta chega errada ao voltar); sobrevive minimizado, morre com o app fechado
+- [x] `GET /api/hoje` real, uma linha por interação devida
+- [x] marcação por tipo: binário, incremento quantificado, recaída negativa
+- [x] cronômetro de `duracao`: `iniciado_em` em `sessionStorage`, tempo por diferença de relógio, **nunca acumulado por `setInterval`** (o navegador estrangula timers em segundo plano e a conta chega errada ao voltar); sobrevive minimizado, morre com o app fechado
+
+**O dashboard não roda a simulação.** As linhas saem das tabelas materializadas, que é o motivo de a materialização existir: replicar o histórico de seis hábitos a cada abertura do app seria o oposto do objetivo. A configuração de cada linha vem do **período**, por `config_id`, e não da vigente hoje — o período foi aberto sob uma versão e é por ela que ele é avaliado. Ler a vigente ali erraria exatamente a armadilha nº 2.
+
+**O bug que o teste pegou, e que teria sido péssimo em uso.** A primeira versão procurava o período com `status = 'aberto'`. Só que cumprir a meta de um hábito diário **fecha** o período de hoje como `cumprido`, e o próximo só começa amanhã — não existe período aberto. O hábito então desaparecia do dashboard no instante em que era marcado, que é precisamente quando ele precisa aparecer com a marca cheia; e o "Tudo cumprido hoje" da tela, que depende das linhas continuarem lá, nunca apareceria. A busca passou a ser pelo período que **cobre hoje**, de qualquer status.
+
+**As duas escalas de progresso, e por quê.** `binario` mostra o **período** (2 de 3 na semana), porque a interação é binária e o que resta de informação é quanto falta para fechar; `quantificado` e `duracao` mostram a **interação de hoje** contra a meta de uma unidade (1400 de 2000 ml), porque é isso que o botão de incremento move; `negativo` mostra o período, porque a tolerância é por período.
+
+Isso obrigou uma correção no cálculo otimista do cliente: `comRegistro` somava o incremento em **todas** as linhas do hábito. Num hábito fixo com meta somável — dois horários, meta em ml — isso mostraria 700 ml em cada dose quando foram 700 numa. Agora o progresso de período (binário, negativo) move em todas as linhas e o de interação (quantificado, duração) só na tocada, igual ao servidor. Conferido nos dois lados pelo mesmo cenário.
+
+**A virada das 04:00 tem teste com relógio congelado.** Um registro feito à 01:30 recebe `data_logica` do dia anterior, e `criado_em` do dia de parede — as duas colunas divergem, e é isso que o mapa descreve. Sem o teste, esse erro só apareceria semanas depois, numa sequência que não fecha. Os temporizadores ficam reais no `useFakeTimers` (`doNotFake`): o driver do Postgres usa `setTimeout` internamente, e congelá-lo faz a consulta nunca voltar.
+
+**`novoVencimento` precisou da mesma lição do período fechado.** Ele só existe em `cada_n_dias`, e normalmente é o `fim` do período aberto — mas quando a meta acaba de ser cumprida não há período aberto. O cálculo cai em `janelaSeguinte`, a **mesma** função que a simulação usaria, em vez de uma soma à mão que seria uma segunda definição da regra de encadeamento.
+
+**O estorno de congelamento é comparação, não evento.** A materialização recalcula o estoque do zero, então o que diz que um congelamento voltou é o total consumido ter diminuído. É o mesmo sinal para marcar e para desmarcar, e não exige que a simulação tenha um conceito de estorno — ela não tem, e não precisa.
+
+**As recusas de registro têm motivo, não silêncio:** hábito inexistente (404), arquivado, pausado no dia pedido, data futura, data fora da janela de 7 dias, e ocorrência que não pertence ao período. Esta última importa mais do que parece: aceitá-la gravaria o registro no slot de outro dia, e o dashboard mostraria a dose da manhã cumprida pela marcação da noite.
+
+**Uma muleta com prazo, documentada no código.** `GET /api/hoje` re-materializa o hábito quando nenhum período cobre hoje. Quem deveria fechar o período da véspera e abrir o de hoje é o worker da etapa 3.5; sem ele, um hábito cujo último acesso foi anteontem sumiria do dashboard, o que é pior que uma escrita dentro de um GET. Quando o worker existir isto continua, como rede — ele pode estar parado, e a conta é uma consulta quando não há nada a fazer.
+
+**O cronômetro não mudou:** ele foi escrito na etapa 2.3 com `iniciado_em` no `sessionStorage` e tempo por diferença de relógio, como o mapa exige. O que a 3.3 fechou foi o outro lado — `origem: "cronometro"` chega ao banco e tem teste.
 
 ### 3.4 Retroativo
 - [ ] janela de 7 dias, marcar e desmarcar, bloqueios visíveis com motivo

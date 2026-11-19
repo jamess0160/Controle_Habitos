@@ -1,5 +1,5 @@
+import { duracaoEmRelogio } from "@/contracts";
 import {
-  cronometroEmTexto,
   dataCurta,
   dataLonga,
   diaCurtoDe,
@@ -81,9 +81,12 @@ describe("progresso na forma própria de cada tipo", () => {
     expect(fracaoDeProgresso({ tipo: "negativo", recaidas: 1, tolerancia: 2 })).toBeNull();
   });
 
-  it("duração conta minutos", () => {
-    expect(textoDeProgresso({ tipo: "duracao", acumulado: 0, meta: 15 })).toBe("0/15 min");
-    expect(fracaoDeProgresso({ tipo: "duracao", acumulado: 3, meta: 15 })).toBeCloseTo(0.2);
+  it("duração vira relógio, porque a unidade é o segundo", () => {
+    expect(textoDeProgresso({ tipo: "duracao", acumulado: 0, meta: 90 })).toBe("00:00/01:30");
+    expect(textoDeProgresso({ tipo: "duracao", acumulado: 30, meta: 3_600 })).toBe(
+      "00:30/1:00:00",
+    );
+    expect(fracaoDeProgresso({ tipo: "duracao", acumulado: 180, meta: 900 })).toBeCloseTo(0.2);
   });
 });
 
@@ -103,14 +106,8 @@ describe("passo do incremento rápido", () => {
 });
 
 describe("cronômetro e contagem de bloqueio", () => {
-  it("mostra mm:ss antes de uma hora e h:mm:ss depois", () => {
-    expect(cronometroEmTexto(0)).toBe("00:00");
-    expect(cronometroEmTexto(65)).toBe("01:05");
-    expect(cronometroEmTexto(3_605)).toBe("1:00:05");
-  });
-
   it("não conta tempo negativo — é o que acontece antes de hidratar, com `agora = 0`", () => {
-    expect(cronometroEmTexto(-30)).toBe("00:00");
+    expect(duracaoEmRelogio(-30)).toBe("00:00");
     expect(restanteAte("2026-11-10T15:00:00.000-03:00", 0)).not.toBe("");
   });
 

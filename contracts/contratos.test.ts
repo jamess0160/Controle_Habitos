@@ -154,7 +154,7 @@ describe("edição não troca o tipo do hábito", () => {
         cadencia: { tipo: "diario" },
         metaOcorrencias: 1,
         notificarEm: "07:00:00",
-        meta: { tipo: "duracao", minutos: 20 },
+        meta: { tipo: "duracao", segundos: 1_200 },
         congelamento: null,
       },
     });

@@ -16,7 +16,7 @@ import type { DataLogica } from "./calendario";
 export type Meta =
   | { tipo: "binario" }
   | { tipo: "quantificado"; valor: number }
-  | { tipo: "duracao"; minutos: number }
+  | { tipo: "duracao"; segundos: number }
   | { tipo: "negativo"; tolerancia: number };
 
 export type Modo =
@@ -49,7 +49,7 @@ export function unidadeCumprida(meta: Meta, registros: RegistroDoDominio[]): boo
     case "quantificado":
       return somar(registros) >= meta.valor;
     case "duracao":
-      return somar(registros) >= meta.minutos;
+      return somar(registros) >= meta.segundos;
     case "negativo":
       throw new Error(
         "Hábito negativo não tem unidade cumprida — avalie o período com avaliarPeriodo.",

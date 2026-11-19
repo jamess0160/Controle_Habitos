@@ -15,6 +15,7 @@ export * from "./erro";
 export * from "./mensagens";
 
 export * from "./auth";
+export * from "./duracao";
 export * from "./habito";
 export * from "./hoje";
 export * from "./infra";

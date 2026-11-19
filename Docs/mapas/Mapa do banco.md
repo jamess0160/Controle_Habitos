@@ -100,7 +100,7 @@ Uma linha por versão da configuração. **Nunca sofre UPDATE**: editar um hábi
 | `notificar_em` | time NULL | modo `flexivel`, lembrete único |
 | `meta_valor` | numeric NULL | tipo `quantificado` |
 | `unidade` | text NULL | tipo `quantificado` (`L`, `páginas`, `km`) |
-| `meta_minutos` | int NULL | tipo `duracao` |
+| `meta_segundos` | int NULL | tipo `duracao`, em segundos inteiros |
 | `tolerancia_recaidas` | int NULL | tipo `negativo`, padrão 0 |
 | `congelamento_ativo` | boolean NOT NULL | |
 | `congelamento_a_cada` | int NULL | interações consecutivas por congelamento ganho |
@@ -115,10 +115,12 @@ Restrições que valem como CHECK, porque são a defesa contra a combinação se
 - `cadencia = 'semanal'` ⇒ `dias_mes` NULL; `cadencia = 'mensal'` ⇒ `dias_semana` NULL
 - `cadencia IN ('diario','cada_n_dias')` ⇒ `dias_semana`/`dias_mes` NULL
 - `congelamento_ativo` ⇒ `congelamento_a_cada >= 1` e `congelamento_max >= 1`
-- campos de meta coerentes com `tipo` (`meta_valor`+`unidade` só em `quantificado`, `meta_minutos` só em `duracao`, `tolerancia_recaidas` só em `negativo`)
+- campos de meta coerentes com `tipo` (`meta_valor`+`unidade` só em `quantificado`, `meta_segundos` só em `duracao`, `tolerancia_recaidas` só em `negativo`)
 - índice único parcial: um só `vigente_ate IS NULL` por `habito_id`
 
-> **Por que `tipo` é duplicado aqui.** CHECK no Postgres não pode referenciar outra tabela, então validar os campos de meta contra `habito.tipo` seria impossível com `tipo` só em `habito`. A saída é `habito` ter `UNIQUE (id, tipo)` e `habito_config` referenciá-lo por FK composta `(habito_id, tipo)` com `ON UPDATE CASCADE`. A coluna é redundante, mas a FK garante que nunca divirja — e em troca o banco passa a rejeitar `meta_minutos` num hábito quantificado, em vez de depender só da validação da aplicação.
+> **Por que `tipo` é duplicado aqui.** CHECK no Postgres não pode referenciar outra tabela, então validar os campos de meta contra `habito.tipo` seria impossível com `tipo` só em `habito`. A saída é `habito` ter `UNIQUE (id, tipo)` e `habito_config` referenciá-lo por FK composta `(habito_id, tipo)` com `ON UPDATE CASCADE`. A coluna é redundante, mas a FK garante que nunca divirja — e em troca o banco passa a rejeitar `meta_segundos` num hábito quantificado, em vez de depender só da validação da aplicação.
+
+**`meta_minutos` virou `meta_segundos`** (migration `0009`, etapa 4). A coluna era `int` de minutos, então a meta mais curta configurável era 1 min e nenhum hábito de 30 s existia. Trocar para `numeric` de minutos resolveria o campo e estragaria a avaliação — a meta é soma de registros, 20 s seriam `0.3333…` e três sessões somariam `0.99999…` contra 1 min, fechando o período perdido com o tempo cumprido. A migration renomeia a coluna, multiplica as metas por 60 e converte `registro.valor` dos hábitos de duração junto (por `periodo_id` → `habito_periodo` → `habito`, porque `registro` não guarda `habito_id`). O `down` divide de volta arredondando **para cima**: 30 s não existem na escala antiga, e truncar daria `0`, que o CHECK recusa.
 
 ### `habito_periodo`
 
@@ -171,7 +173,7 @@ Evento bruto: o que você de fato fez (ou, em hábito `negativo`, a recaída). D
 | `periodo_id` | uuid FK → `habito_periodo` | sempre preenchido |
 | `ocorrencia_id` | uuid FK → `habito_ocorrencia` NULL | só no modo `fixo` |
 | `data_logica` | date NOT NULL | a que dia o registro pertence |
-| `valor` | numeric NOT NULL DEFAULT 1 | 1 (binário/negativo), quantidade, ou minutos |
+| `valor` | numeric NOT NULL DEFAULT 1 | 1 (binário/negativo), quantidade, ou **segundos** na duração |
 | `origem` | `registro_origem` NOT NULL | `app` \| `retroativo` \| `cronometro` |
 | `criado_em` | timestamptz NOT NULL | quando foi efetivamente registrado |
 

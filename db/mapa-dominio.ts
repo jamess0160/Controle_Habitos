@@ -54,7 +54,7 @@ function metaDe(linha: HabitoConfig): Meta {
     case "duracao":
       return {
         tipo: "duracao",
-        minutos: exigir(linha.meta_minutos, "meta_minutos", "hábito de duração"),
+        segundos: exigir(linha.meta_segundos, "meta_segundos", "hábito de duração"),
       };
     case "negativo":
       return {
@@ -161,7 +161,7 @@ export function linhaDeConfig(
 
     meta_valor: config.meta.tipo === "quantificado" ? config.meta.valor : null,
     unidade: config.meta.tipo === "quantificado" ? config.meta.unidade : null,
-    meta_minutos: config.meta.tipo === "duracao" ? config.meta.minutos : null,
+    meta_segundos: config.meta.tipo === "duracao" ? config.meta.segundos : null,
     tolerancia_recaidas: config.meta.tipo === "negativo" ? config.meta.tolerancia : null,
 
     congelamento_ativo: config.congelamento !== null,
@@ -212,7 +212,7 @@ function metaDoContrato(linha: HabitoConfig): ConfigDoContrato["meta"] {
     case "duracao":
       return {
         tipo: "duracao",
-        minutos: exigir(linha.meta_minutos, "meta_minutos", "hábito de duração"),
+        segundos: exigir(linha.meta_segundos, "meta_segundos", "hábito de duração"),
       };
     case "negativo":
       return {

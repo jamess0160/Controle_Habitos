@@ -4,16 +4,19 @@ import { useParams } from "next/navigation";
 import { useState } from "react";
 import { enviar, useRecurso, type Falha } from "@/cliente/api";
 import { dataCurta, diaCurtoDe, numero } from "@/cliente/formato";
-import type {
-  Cor,
-  DiaRetroativo,
-  Efeitos,
-  Meta,
-  Retroativo,
-  RetroativoAplicado,
-  RegistroRemovido,
+import {
+  duracaoEmTexto,
+  type Cor,
+  type DiaRetroativo,
+  type Efeitos,
+  type Meta,
+  type Retroativo,
+  type RetroativoAplicado,
+  type RegistroRemovido,
 } from "@/contracts";
 import { CabecalhoDeTarefa } from "./cabecalho-de-tarefa";
+import { CampoDeDuracao } from "./campo-de-duracao";
+import { partesDeSegundos, segundosDePartes, type PartesDeDuracao } from "./duracao";
 import { Carregando, Erro } from "./estado-da-tela";
 import { Marca, type EstadoDaMarca } from "./marca";
 import { Sequencia } from "./sequencia";
@@ -394,7 +397,8 @@ function DiaItem({
           {bloqueado && dia.motivoBloqueio !== null && MOTIVO[dia.motivoBloqueio]}
           {dia.estado === "congelado" && "congelamento usado"}
           {recaidas > 0 && (recaidas === 1 ? "recaída" : `${recaidas} recaídas`)}
-          {dia.valor !== null && `${numero(dia.valor)}${meta.tipo === "duracao" ? " min" : ""}`}
+          {dia.valor !== null &&
+            (meta.tipo === "duracao" ? duracaoEmTexto(dia.valor) : numero(dia.valor))}
         </span>
 
         <Marca estado={MARCA_DE_ESTADO[dia.estado]} cor={cor} tamanho="toque" />
@@ -405,7 +409,14 @@ function DiaItem({
   );
 }
 
-/** Em `quantificado` e `duracao` o dia não alterna: ele recebe um valor. */
+/**
+ * Em `quantificado` e `duracao` o dia não alterna: ele recebe um valor.
+ *
+ * Os dois caminhos são componentes separados, e não um `if` lá dentro, porque
+ * cada um tem o seu `useState` — chamar hook depois de um retorno antecipado é
+ * ordem de hooks variável, que o próprio React recusaria se o tipo do hábito
+ * mudasse entre renders.
+ */
 function EntradaDeValor({
   meta,
   ocupado,
@@ -415,9 +426,24 @@ function EntradaDeValor({
   readonly ocupado: boolean;
   readonly aoMarcar: (valor: number) => void;
 }) {
-  const sugestao =
-    meta.tipo === "quantificado" ? meta.valor : meta.tipo === "duracao" ? meta.minutos : 1;
-  const unidade = meta.tipo === "quantificado" ? meta.unidade : "min";
+  return meta.tipo === "duracao" ? (
+    <EntradaDeDuracao segundos={meta.segundos} ocupado={ocupado} aoMarcar={aoMarcar} />
+  ) : (
+    <EntradaDeNumero meta={meta} ocupado={ocupado} aoMarcar={aoMarcar} />
+  );
+}
+
+function EntradaDeNumero({
+  meta,
+  ocupado,
+  aoMarcar,
+}: {
+  readonly meta: Exclude<Meta, { tipo: "duracao" }>;
+  readonly ocupado: boolean;
+  readonly aoMarcar: (valor: number) => void;
+}) {
+  const sugestao = meta.tipo === "quantificado" ? meta.valor : 1;
+  const unidade = meta.tipo === "quantificado" ? meta.unidade : "";
 
   const [valor, setValor] = useState(String(sugestao));
   const numerico = Number(valor);
@@ -437,6 +463,36 @@ function EntradaDeValor({
         />
       </label>
       <Botao variante="primario" disabled={ocupado || !valido} onClick={() => aoMarcar(numerico)}>
+        Registrar
+      </Botao>
+    </div>
+  );
+}
+
+/**
+ * O mesmo relógio do formulário, já preenchido com a meta do hábito: o
+ * retroativo conserta um dia que foi cumprido e não foi marcado, então a meta é
+ * a resposta certa na maioria dos dias.
+ */
+function EntradaDeDuracao({
+  segundos,
+  ocupado,
+  aoMarcar,
+}: {
+  readonly segundos: number;
+  readonly ocupado: boolean;
+  readonly aoMarcar: (valor: number) => void;
+}) {
+  const [partes, setPartes] = useState<PartesDeDuracao>(() => partesDeSegundos(segundos));
+  const total = segundosDePartes(partes);
+  const valido = Number.isFinite(total) && total > 0;
+
+  return (
+    <div className="flex items-end gap-2 border-t border-linha p-3">
+      <div className="flex-1">
+        <CampoDeDuracao rotulo="Tempo do dia" partes={partes} aoMudar={setPartes} />
+      </div>
+      <Botao variante="primario" disabled={ocupado || !valido} onClick={() => aoMarcar(total)}>
         Registrar
       </Botao>
     </div>

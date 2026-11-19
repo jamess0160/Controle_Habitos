@@ -188,13 +188,13 @@ describe("montarHoje", () => {
       expect(linhas[0].concluida).toBe(true);
     });
 
-    it("duração conta minutos e aceita o cronômetro como origem", async () => {
-      const habito = await criar("🤸 Alongar", config({ meta: { tipo: "duracao", minutos: 15 } }));
+    it("duração conta segundos e aceita o cronômetro como origem", async () => {
+      const habito = await criar("🤸 Alongar", config({ meta: { tipo: "duracao", segundos: 90 } }));
 
-      await criarRegistroNoBanco({ habitoId: habito.id, valor: 7, origem: "cronometro" });
+      await criarRegistroNoBanco({ habitoId: habito.id, valor: 45, origem: "cronometro" });
 
       const { linhas } = await montarHoje();
-      expect(linhas[0].progresso).toEqual({ tipo: "duracao", acumulado: 7, meta: 15 });
+      expect(linhas[0].progresso).toEqual({ tipo: "duracao", acumulado: 45, meta: 90 });
       expect(linhas[0].concluida).toBe(false);
 
       const linha = await db("registro").first("origem");

@@ -9,7 +9,7 @@ const reg = (valor = 1, data = "2026-11-09"): RegistroDoDominio => ({
 
 const binario: Meta = { tipo: "binario" };
 const agua: Meta = { tipo: "quantificado", valor: 2 };
-const meditar: Meta = { tipo: "duracao", minutos: 10 };
+const meditar: Meta = { tipo: "duracao", segundos: 600 };
 const naoFumar: Meta = { tipo: "negativo", tolerancia: 0 };
 
 describe("unidadeCumprida", () => {
@@ -24,9 +24,26 @@ describe("unidadeCumprida", () => {
     expect(unidadeCumprida(agua, [reg(3)])).toBe(true);
   });
 
-  it("duração soma minutos", () => {
-    expect(unidadeCumprida(meditar, [reg(4), reg(5)])).toBe(false);
-    expect(unidadeCumprida(meditar, [reg(4), reg(6)])).toBe(true);
+  it("duração soma segundos", () => {
+    expect(unidadeCumprida(meditar, [reg(240), reg(300)])).toBe(false);
+    expect(unidadeCumprida(meditar, [reg(240), reg(360)])).toBe(true);
+  });
+
+  /*
+   * O caso que decidiu a unidade. Em minuto fracionário, 20 s seriam `0.3333…`
+   * e três sessões somariam `0.99999…` contra uma meta de 1 min: a soma exata
+   * fecharia o período **perdido** com o tempo cumprido. Em segundo inteiro não
+   * existe o arredondamento que produzia isso.
+   */
+  it("três sessões de 20 s cumprem uma meta de 1 min, sem erro de ponto flutuante", () => {
+    const umMinuto: Meta = { tipo: "duracao", segundos: 60 };
+    expect(unidadeCumprida(umMinuto, [reg(20), reg(20), reg(20)])).toBe(true);
+  });
+
+  it("meta de menos de um minuto existe — era o que a escala antiga impedia", () => {
+    const respirar: Meta = { tipo: "duracao", segundos: 30 };
+    expect(unidadeCumprida(respirar, [reg(29)])).toBe(false);
+    expect(unidadeCumprida(respirar, [reg(30)])).toBe(true);
   });
 
   it("recusa avaliar hábito negativo por unidade", () => {

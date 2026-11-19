@@ -26,7 +26,7 @@ export const criarRegistro = z.strictObject({
   habitoId: uuid,
   /** Só no modo fixo: qual momento está sendo marcado. */
   ocorrenciaId: uuid.nullable().optional(),
-  /** Quantidade no quantificado, minutos na duração; 1 nos demais. */
+  /** Quantidade no quantificado, **segundos** na duração; 1 nos demais. */
   valor: z.number().positive().optional(),
   dataLogica: dataLogica.optional(),
   origem: origem.default("app"),
@@ -130,7 +130,7 @@ export const retroativo = z.object({
    * `dias[].valor`, que é nulo justamente nos dias ainda vazios.
    *
    * Vai a meta inteira, não só o `tipo`: o campo de quantificado precisa da
-   * `unidade` no rótulo, e o de duração precisa saber a meta em minutos.
+   * `unidade` no rótulo, e o de duração precisa saber a meta em segundos.
    */
   meta,
   /** Progresso do período corrente, como aparece no cabeçalho da tela. */

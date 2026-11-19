@@ -9,7 +9,7 @@ npm run dev     # dev server (Turbopack) on http://localhost:3000
 npm run build   # production build
 npm run start   # serve the production build
 npm run lint    # eslint (flat config; takes no args by default)
-npm test        # jest (556 casos; exige o db:up rodando)
+npm test        # jest (579 casos; exige o db:up rodando)
 
 npm run db:up        # sobe o Postgres de desenvolvimento (docker-compose.dev.yml)
 npm run db:migrate   # aplica as migrations pendentes
@@ -72,6 +72,7 @@ Four traps worth stating up front:
 - **Habit configuration is versioned.** Past periods must be evaluated by the rule in force then, never by the current config.
 - **`cada_n_dias` is anchored on the last completion**, so its periods cannot be pre-generated, its `fim` is mutable, and a retroactive edit re-chains every later period. The other cadences behave conventionally.
 - **Freezes are consumed automatically** when a period closes short of its goal. There is no `em_risco` state and no redemption deadline — the 7-day retroactive window is the only correction path.
+- **`duracao` is measured in whole seconds**, not minutes — `habito_config.meta_segundos` and `registro.valor`. Fractional minutes are not an option: the goal is met by *summing registros*, and three 20 s sessions would add up to `0.99999…` against a 1 min goal. `contracts/duracao.ts` is the only place that decomposes and writes the unit.
 
 Schema and queries both go through **Knex** (migrations + seeds in `db/`), with the table types in `db/tipos.ts` wired into `knex/types/tables`. In development the Knex instance must be a `globalThis` singleton, or Next's hot reload will open a new pool per recompile and exhaust Postgres connections. `next.config.ts` lists `knex` in `serverExternalPackages`: it resolves dialects with a dynamic require, and without that Turbopack tries to bundle `sqlite3`, `mysql2`, `oracledb` and `tedious`, failing the build. Joins are the one place the typed rows give up — `Knex.TableType` describes tables, not junctions, so a `join` types as `never` and the few queries that need one carry a hand-written row type with the reason written next to it.
 
@@ -98,14 +99,14 @@ Três consequências que não são óbvias e que o código documenta no lugar:
 
 ### O que existe
 
-- `db/` — 8 migrations. A `0007` removeu `congelamento.estornado_em` (estorno é a diferença entre dois recálculos, não um evento numa linha) e a `0008` trocou `notificacao_enviada.referencia_id` por `referencia` em texto. `db/teste.ts` cria **um database por worker** do Jest; `db/teste-url.ts` calcula a URL sem arrastar o driver, porque `pg` quebra em `jsdom`.
+- `db/` — 9 migrations. A `0009` trocou `habito_config.meta_minutos` por `meta_segundos` e converteu o `registro.valor` dos hábitos de duração junto. A `0007` removeu `congelamento.estornado_em` (estorno é a diferença entre dois recálculos, não um evento numa linha) e a `0008` trocou `notificacao_enviada.referencia_id` por `referencia` em texto. `db/teste.ts` cria **um database por worker** do Jest; `db/teste-url.ts` calcula a URL sem arrastar o driver, porque `pg` quebra em `jsdom`.
 - `dominio/` — o núcleo puro, com relógio injetado. `simulacao.ts` é o replay.
 - `contracts/` — Zod como fonte única, com `cadencia`/`meta` em uniões discriminadas aninhadas. `contracts/resumo.ts` é a **única** implementação da regra do hábito como frase.
 - `servidor/` — autenticação (Argon2id, sessão de token opaco com SHA-256 no banco, rate limiting em tabela por `CF-Connecting-IP`, WebAuthn com trava de `rp_id`), hábitos, dashboard, registro, retroativo, push e o relógio lógico. `relogio.ts` tem o único `horaDeParede` do projeto.
 - `worker/` — processo separado (`npm run worker`), tique de 1 minuto: virada do dia, notificações e limpeza, cada etapa capturada em separado para que uma falha de rede não impeça o fechamento. **Não sabe fechar período** — fechar é re-materializar.
 - `cli/` — `push:chaves` (gera o par VAPID e imprime para colar à mão), `cli:reset-biometria` e `cli:reset-senha`. As duas últimas são transacionais e exigem a palavra escrita, não `s/n`.
 - `cliente/` — o espelho de `servidor/` no navegador: `api.ts` (um formato de erro para toda falha, rede incluída, e o desvio 401→`/login` / 409→`/biometria` num lugar só), `push.ts`, `webauthn.ts`, `formato.ts`.
-- `componentes/` — as sete telas, mais os módulos React-free e testados onde um erro de conta seria silencioso: `rascunho-de-habito.ts` e `efeitos-de-hoje.ts`.
+- `componentes/` — as sete telas, mais os módulos React-free e testados onde um erro de conta seria silencioso: `rascunho-de-habito.ts`, `duracao.ts` e `efeitos-de-hoje.ts`.
 - `public/sw.js` — service worker com `push` e `notificationclick`.
 
 ### Duas horas de notificação decididas na 3.5
@@ -117,7 +118,7 @@ Não estavam no mapa de regras, e estão em `worker/notificacoes.ts`:
 
 ### Testes
 
-`npm test` roda 556 casos em 26 arquivos (Jest 30 via `next/jest`). Exige o `db:up` rodando e nada mais — cada worker cria e migra o próprio database.
+`npm test` roda 579 casos em 28 arquivos (Jest 30 via `next/jest`). Exige o `db:up` rodando e nada mais — cada worker cria e migra o próprio database.
 
 Quatro coisas que valem saber antes de escrever um teste aqui:
 

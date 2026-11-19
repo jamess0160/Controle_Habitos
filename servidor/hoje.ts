@@ -287,7 +287,7 @@ function progressoDe(
       return {
         tipo: "duracao",
         acumulado: somar(daInteracao),
-        meta: config.meta.minutos,
+        meta: config.meta.segundos,
       };
     case "negativo":
       return {
@@ -315,7 +315,7 @@ function concluidaDe(
     case "quantificado":
       return somar(daInteracao) >= config.meta.valor;
     case "duracao":
-      return somar(daInteracao) >= config.meta.minutos;
+      return somar(daInteracao) >= config.meta.segundos;
     case "negativo":
       /* Nasce cumprido: "sem recaída" é o estado inicial. */
       return doPeriodo.length <= config.meta.tolerancia;

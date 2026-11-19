@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useSyncExternalStore } from "react";
-import { cronometroEmTexto } from "@/cliente/formato";
 import { useAgora } from "@/cliente/relogio";
+import { duracaoEmRelogio, duracaoEmTexto } from "@/contracts";
 import { Pausa, Play } from "./icones";
 import { Botao } from "./ui";
 
@@ -59,8 +59,8 @@ function lerInicio(habitoId: string): number | null {
 type Props = {
   readonly habitoId: string;
   readonly ocupado: boolean;
-  /** Minutos decorridos. Quem persiste é a tela, com `origem: "cronometro"`. */
-  readonly aoParar: (minutos: number) => void;
+  /** Segundos decorridos. Quem persiste é a tela, com `origem: "cronometro"`. */
+  readonly aoParar: (segundos: number) => void;
 };
 
 export function Cronometro({ habitoId, ocupado, aoParar }: Props) {
@@ -84,11 +84,15 @@ export function Cronometro({ habitoId, ocupado, aoParar }: Props) {
 
   function parar() {
     /*
-     * Arredonda para o minuto, com piso de 1: a meta do hábito é em minutos
-     * inteiros, e uma sessão de 40 segundos registrada como 0.67 min poluiria o
-     * histórico com um número que nenhuma tela sabe mostrar.
+     * Registra o segundo decorrido, sem arredondar.
+     *
+     * Arredondava para o minuto com piso de 1 enquanto a meta era em minutos
+     * inteiros: 40 s eram gravados como 1 min, e 1 min 30 s como 2 min — o
+     * cronômetro media melhor do que conseguia guardar. Com a meta em segundos
+     * (ver `contracts/duracao.ts`) o piso ainda é 1: zero não é registro, e um
+     * toque duplo em "parar" não deve criar linha de duração nula.
      */
-    const minutos = Math.max(1, Math.round(segundos / 60));
+    const decorridos = Math.max(1, segundos);
 
     try {
       sessionStorage.removeItem(chave(habitoId));
@@ -96,7 +100,7 @@ export function Cronometro({ habitoId, ocupado, aoParar }: Props) {
       /* idem */
     }
     avisar();
-    aoParar(minutos);
+    aoParar(decorridos);
   }
 
   if (inicio === null) {
@@ -118,9 +122,9 @@ export function Cronometro({ habitoId, ocupado, aoParar }: Props) {
       <span
         className="font-mono text-2xl tabular-nums"
         role="timer"
-        aria-label={`${Math.floor(segundos / 60)} minutos`}
+        aria-label={duracaoEmTexto(segundos)}
       >
-        {cronometroEmTexto(segundos)}
+        {duracaoEmRelogio(segundos)}
       </span>
       <Botao variante="primario" onClick={parar} disabled={ocupado}>
         <Pausa className="size-4" />

@@ -176,7 +176,7 @@ function agua(inicio: DataLogica, dias: DataLogica[]): Semente {
         notificar_em: "09:00:00",
         meta_valor: 2000,
         unidade: "ml",
-        meta_minutos: null,
+        meta_segundos: null,
         tolerancia_recaidas: null,
         congelamento_ativo: true,
         congelamento_a_cada: 3,
@@ -213,7 +213,7 @@ function correr(inicio: DataLogica, hoje: DataLogica, dias: DataLogica[]): Semen
     notificar_em: "18:00:00",
     meta_valor: null,
     unidade: null,
-    meta_minutos: null,
+    meta_segundos: null,
     tolerancia_recaidas: null,
     congelamento_ativo: true,
     congelamento_a_cada: 2,
@@ -265,7 +265,8 @@ function meditar(inicio: DataLogica, hoje: DataLogica, dias: DataLogica[]): Seme
     if (chance < 0.75) {
       registros.push({
         dataLogica: dia,
-        valor: 12 + Math.floor(sortear() * 14),
+        // Em segundos: 12 a 25 minutos de sessão.
+        valor: (12 + Math.floor(sortear() * 14)) * 60,
         horario: null,
         origem: "cronometro",
         criadoEm: instanteDe(dia, "06:45:00"),
@@ -274,7 +275,7 @@ function meditar(inicio: DataLogica, hoje: DataLogica, dias: DataLogica[]): Seme
       // Sessão curta: não alcança os 10 minutos e o dia fecha perdido.
       registros.push({
         dataLogica: dia,
-        valor: 6,
+        valor: 6 * 60,
         horario: null,
         origem: "cronometro",
         criadoEm: instanteDe(dia, "07:10:00"),
@@ -307,7 +308,7 @@ function meditar(inicio: DataLogica, hoje: DataLogica, dias: DataLogica[]): Seme
         notificar_em: "06:30:00",
         meta_valor: null,
         unidade: null,
-        meta_minutos: 10,
+        meta_segundos: 600,
         tolerancia_recaidas: null,
         congelamento_ativo: false,
         congelamento_a_cada: null,
@@ -355,7 +356,7 @@ function semRefrigerante(inicio: DataLogica, dias: DataLogica[]): Semente {
         notificar_em: null,
         meta_valor: null,
         unidade: null,
-        meta_minutos: null,
+        meta_segundos: null,
         tolerancia_recaidas: 2,
         congelamento_ativo: false,
         congelamento_a_cada: null,
@@ -407,7 +408,7 @@ function ler(inicio: DataLogica, dias: DataLogica[]): Semente {
         notificar_em: "21:00:00",
         meta_valor: null,
         unidade: null,
-        meta_minutos: null,
+        meta_segundos: null,
         tolerancia_recaidas: null,
         congelamento_ativo: true,
         congelamento_a_cada: 4,
@@ -461,7 +462,7 @@ function vitamina(inicio: DataLogica, dias: DataLogica[]): Semente {
         notificar_em: null, // só o modo flexível aceita (CHECK da migration)
         meta_valor: null,
         unidade: null,
-        meta_minutos: null,
+        meta_segundos: null,
         tolerancia_recaidas: null,
         congelamento_ativo: true,
         congelamento_a_cada: 3,

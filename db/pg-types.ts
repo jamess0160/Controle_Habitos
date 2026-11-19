@@ -15,7 +15,7 @@ let aplicado = false;
  * dia. Mantemos DATE como string `YYYY-MM-DD`.
  *
  * NUMERIC: vem como string para não perder precisão. Os numerics daqui são
- * quantidades pequenas (litros, páginas, km, minutos), então convertemos para
+ * quantidades pequenas (litros, páginas, km, segundos), então convertemos para
  * number e evitamos conversão espalhada pelo código.
  */
 export function aplicarParsersPg(): void {

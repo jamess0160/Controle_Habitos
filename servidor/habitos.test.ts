@@ -295,7 +295,7 @@ describe("versionamento de habito_config", () => {
 
     const { editarHabito } = await import("@/contracts");
     const resultado = editarHabito(habito.config.meta.tipo).safeParse({
-      config: diaria({ meta: { tipo: "duracao", minutos: 20 } }),
+      config: diaria({ meta: { tipo: "duracao", segundos: 1_200 } }),
     });
 
     expect(resultado.success).toBe(false);
@@ -311,7 +311,7 @@ describe("versionamento de habito_config", () => {
 
     await expect(
       editarHabitoNoBanco(habito.id, {
-        config: diaria({ meta: { tipo: "duracao", minutos: 20 } }),
+        config: diaria({ meta: { tipo: "duracao", segundos: 1_200 } }),
       }),
     ).rejects.toThrow(/imutável/);
   });

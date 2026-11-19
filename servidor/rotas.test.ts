@@ -413,7 +413,7 @@ describe("validação ligada nas rotas que escrevem", () => {
           cadencia: { tipo: "diario" },
           metaOcorrencias: 1,
           notificarEm: null,
-          meta: { tipo: "duracao", minutos: 20 },
+          meta: { tipo: "duracao", segundos: 1_200 },
           congelamento: null,
         },
       }),

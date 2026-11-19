@@ -64,7 +64,8 @@ export interface HabitoConfig {
 
   meta_valor: number | null;
   unidade: string | null;
-  meta_minutos: number | null;
+  /** Tipo `duracao`, em segundos inteiros — ver `contracts/duracao.ts`. */
+  meta_segundos: number | null;
   tolerancia_recaidas: number | null;
 
   congelamento_ativo: boolean;

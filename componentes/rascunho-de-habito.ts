@@ -1,4 +1,10 @@
 import type { Cor, Habito, TipoHabito } from "@/contracts";
+import {
+  DURACAO_VAZIA,
+  partesDeSegundos,
+  segundosDePartes,
+  type PartesDeDuracao,
+} from "./duracao";
 
 /**
  * A tradução rascunho ⇆ configuração.
@@ -25,7 +31,8 @@ export type Rascunho = {
   tipo: TipoHabito;
   valor: string;
   unidade: string;
-  minutos: string;
+  /** Meta do tipo `duracao`, como relógio `h : min : s` — ver `duracao.ts`. */
+  duracao: PartesDeDuracao;
   tolerancia: string;
   cadencia: Cadencia;
   intervalo: string;
@@ -35,11 +42,28 @@ export type Rascunho = {
   diasMes: number[];
   /** `"HH:MM"`, o formato do `<input type="time">`. O contrato quer `:00` no fim. */
   horarios: string[];
+  /**
+   * O lembrete é opt-in explícito, e não "deixe em branco para não receber".
+   * Um campo de horário sempre à vista pergunta *quando*, nunca *se* — e o
+   * `<input type="time">` em branco é indistinguível de um campo que a pessoa
+   * ainda não preencheu. Com o botão, o estado "sem lembrete" é uma escolha
+   * visível, igual ao congelamento do passo 6.
+   */
+  lembreteAtivo: boolean;
   notificarEm: string;
   congelamentoAtivo: boolean;
   aCada: string;
   max: string;
 };
+
+/**
+ * O horário com que o lembrete nasce ao ser ativado.
+ *
+ * 20:00 e não 08:00 porque é o horário do `meta_atraso` do worker: um lembrete
+ * de fim de dia avisa que o período ainda está aberto, enquanto um das 08:00
+ * chega antes de haver qualquer coisa a lembrar.
+ */
+export const HORARIO_PADRAO_DO_LEMBRETE = "20:00";
 
 export function rascunhoDe(habito: Habito | null): Rascunho {
   const base: Rascunho = {
@@ -48,7 +72,7 @@ export function rascunhoDe(habito: Habito | null): Rascunho {
     tipo: "binario",
     valor: "",
     unidade: "",
-    minutos: "",
+    duracao: DURACAO_VAZIA,
     tolerancia: "0",
     cadencia: "diario",
     intervalo: "15",
@@ -57,7 +81,8 @@ export function rascunhoDe(habito: Habito | null): Rascunho {
     diasSemana: [2, 4, 6],
     diasMes: [1],
     horarios: ["08:00"],
-    notificarEm: "",
+    lembreteAtivo: false,
+    notificarEm: HORARIO_PADRAO_DO_LEMBRETE,
     congelamentoAtivo: false,
     aCada: "3",
     max: "2",
@@ -73,7 +98,8 @@ export function rascunhoDe(habito: Habito | null): Rascunho {
     tipo: config.meta.tipo,
     valor: config.meta.tipo === "quantificado" ? String(config.meta.valor) : base.valor,
     unidade: config.meta.tipo === "quantificado" ? config.meta.unidade : base.unidade,
-    minutos: config.meta.tipo === "duracao" ? String(config.meta.minutos) : base.minutos,
+    duracao:
+      config.meta.tipo === "duracao" ? partesDeSegundos(config.meta.segundos) : base.duracao,
     tolerancia: config.meta.tipo === "negativo" ? String(config.meta.tolerancia) : base.tolerancia,
     cadencia: config.cadencia.tipo,
     congelamentoAtivo: config.congelamento !== null,
@@ -88,7 +114,9 @@ export function rascunhoDe(habito: Habito | null): Rascunho {
       diasSemana: config.cadencia.tipo === "semanal" ? config.cadencia.diasSemana : base.diasSemana,
       diasMes: config.cadencia.tipo === "mensal" ? config.cadencia.diasMes : base.diasMes,
       horarios: (config.cadencia.horarios ?? []).map((h) => h.slice(0, 5)),
-      notificarEm: "",
+      /* No modo fixo o lembrete é derivado dos horários — não há o que ativar. */
+      lembreteAtivo: false,
+      notificarEm: base.notificarEm,
     };
   }
 
@@ -98,7 +126,9 @@ export function rascunhoDe(habito: Habito | null): Rascunho {
     metaOcorrencias: String(config.metaOcorrencias),
     intervalo:
       config.cadencia.tipo === "cada_n_dias" ? String(config.cadencia.intervalo) : base.intervalo,
-    notificarEm: config.notificarEm === null ? "" : config.notificarEm.slice(0, 5),
+    lembreteAtivo: config.notificarEm !== null,
+    notificarEm:
+      config.notificarEm === null ? base.notificarEm : config.notificarEm.slice(0, 5),
   };
 }
 
@@ -112,7 +142,7 @@ export function montarConfig(r: Rascunho): unknown {
     r.tipo === "quantificado"
       ? { tipo: "quantificado", valor: Number(r.valor), unidade: r.unidade }
       : r.tipo === "duracao"
-        ? { tipo: "duracao", minutos: Number(r.minutos) }
+        ? { tipo: "duracao", segundos: segundosDePartes(r.duracao) }
         : r.tipo === "negativo"
           ? { tipo: "negativo", tolerancia: Number(r.tolerancia) }
           : { tipo: "binario" };
@@ -143,7 +173,17 @@ export function montarConfig(r: Rascunho): unknown {
     modo: "flexivel",
     cadencia,
     metaOcorrencias: Number(r.metaOcorrencias),
-    notificarEm: r.notificarEm === "" ? null : comSegundos(r.notificarEm),
+    /*
+     * Ativo com o campo em branco **não** vira `null`: silenciar um lembrete que
+     * a pessoa acabou de pedir é pior que a mensagem de validação. O horário
+     * vazio chega ao schema como `""`, que `horario` recusa, e o erro aponta
+     * para `config.notificarEm` — o passo 5.
+     */
+    notificarEm: !r.lembreteAtivo
+      ? null
+      : r.notificarEm === ""
+        ? ""
+        : comSegundos(r.notificarEm),
     meta,
     congelamento,
   };

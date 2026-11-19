@@ -50,9 +50,9 @@ describe("concluidaDe muda de regra com o tipo", () => {
     expect(concluidaDe({ ...parcial, acumulado: 2000 }, false)).toBe(true);
   });
 
-  it("duração fecha ao alcançar os minutos", () => {
-    expect(concluidaDe({ tipo: "duracao", acumulado: 14, meta: 15 }, true)).toBe(false);
-    expect(concluidaDe({ tipo: "duracao", acumulado: 15, meta: 15 }, true)).toBe(true);
+  it("duração fecha ao alcançar os segundos", () => {
+    expect(concluidaDe({ tipo: "duracao", acumulado: 89, meta: 90 }, true)).toBe(false);
+    expect(concluidaDe({ tipo: "duracao", acumulado: 90, meta: 90 }, true)).toBe(true);
   });
 
   it("negativo nasce cumprido e cai ao passar da tolerância", () => {

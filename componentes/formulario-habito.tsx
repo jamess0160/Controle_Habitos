@@ -16,8 +16,10 @@ import {
   type Habito,
   type TipoHabito,
 } from "@/contracts";
+import { CampoDeDuracao } from "./campo-de-duracao";
 import { CLASSE_COR, ROTULO_COR } from "./cor";
 import {
+  HORARIO_PADRAO_DO_LEMBRETE,
   montarConfig,
   passoDoCampo,
   rascunhoDe,
@@ -129,6 +131,27 @@ export function FormularioDeHabito({ habito }: { readonly habito: Habito | null 
       setFalha(r.falha);
       setErros(r.falha.campos ?? []);
       return;
+    }
+
+    /*
+     * Zera o rascunho antes de sair, e só na criação.
+     *
+     * `router.replace` troca a rota, não o estado deste componente: quando ele
+     * sobrevive à navegação — o cache de rotas devolvendo a mesma árvore ao
+     * voltar para `/habitos/novo` — o próximo cadastro abria com o hábito
+     * anterior inteiro dentro, no passo em que o anterior terminou. Recarregar a
+     * página era o único jeito de limpar. Zerar aqui não depende de descobrir
+     * quando a árvore é reaproveitada.
+     *
+     * Na edição não se zera: o formulário continua sendo o daquele hábito, e
+     * jogá-lo para os defaults de criação exibiria, por um quadro, uma
+     * configuração que não é a de ninguém.
+     */
+    if (!editando) {
+      setRascunho(rascunhoDe(null));
+      setPasso(0);
+      setErros([]);
+      setFalha(null);
     }
 
     router.replace("/habitos");
@@ -280,7 +303,7 @@ function PassoIdentidade({ rascunho, muda, erroDe }: PropsDePasso) {
 const DESCRICAO_DE_TIPO: Record<TipoHabito, { rotulo: string; descricao: string }> = {
   binario: { rotulo: "Binário", descricao: "Fez ou não fez." },
   quantificado: { rotulo: "Quantificado", descricao: "Acumula um valor: ml, páginas, km." },
-  duracao: { rotulo: "Duração", descricao: "Acumula minutos, com cronômetro." },
+  duracao: { rotulo: "Duração", descricao: "Acumula tempo, com cronômetro." },
   negativo: { rotulo: "Negativo", descricao: "Evitar algo. Conta recaídas, não acertos." },
 };
 
@@ -341,17 +364,13 @@ function PassoTipo({
       )}
 
       {rascunho.tipo === "duracao" && (
-        <Campo rotulo="Minutos por interação" erro={erroDe("config.meta.minutos")}>
-          <input
-            type="number"
-            inputMode="numeric"
-            min={1}
-            value={rascunho.minutos}
-            onChange={(e) => muda("minutos", e.target.value)}
-            placeholder="15"
-            className={CLASSE_ENTRADA}
-          />
-        </Campo>
+        <CampoDeDuracao
+          rotulo="Duração por interação"
+          erro={erroDe("config.meta.segundos")}
+          dica="A unidade é o segundo, então metas curtas cabem: 30 s de respiração, 45 s de prancha."
+          partes={rascunho.duracao}
+          aoMudar={(partes) => muda("duracao", partes)}
+        />
       )}
 
       {rascunho.tipo === "negativo" && (
@@ -521,18 +540,64 @@ function PassoNotificacao({ rascunho, muda, erroDe }: PropsDePasso) {
   }
 
   return (
-    <Campo
-      rotulo="Horário do lembrete"
-      erro={erroDe("config.notificarEm")}
-      dica="Em branco, nenhum lembrete é enviado para este hábito."
-    >
-      <input
-        type="time"
-        value={rascunho.notificarEm}
-        onChange={(e) => muda("notificarEm", e.target.value)}
-        className={CLASSE_ENTRADA}
+    <>
+      <Escolha
+        rotulo="Lembrete"
+        valor={rascunho.lembreteAtivo ? "sim" : "nao"}
+        opcoes={[
+          { valor: "sim", rotulo: "Ativar" },
+          { valor: "nao", rotulo: "Sem lembrete" },
+        ]}
+        aoEscolher={(v) => {
+          const ativo = v === "sim";
+          muda("lembreteAtivo", ativo);
+          /*
+           * Reativar com o campo limpo pelo usuário devolveria um horário vazio
+           * e, com ele, um erro de validação em cima de uma escolha que acabou
+           * de ser feita. O padrão volta junto.
+           */
+          if (ativo && rascunho.notificarEm === "") {
+            muda("notificarEm", HORARIO_PADRAO_DO_LEMBRETE);
+          }
+        }}
       />
-    </Campo>
+
+      {rascunho.lembreteAtivo && (
+        <Campo rotulo="Horário do lembrete" erro={erroDe("config.notificarEm")}>
+          <input
+            type="time"
+            value={rascunho.notificarEm}
+            onChange={(e) => muda("notificarEm", e.target.value)}
+            className={CLASSE_ENTRADA}
+          />
+        </Campo>
+      )}
+
+      {!rascunho.lembreteAtivo && (
+        /*
+         * O que ainda chega sem lembrete depende da cadência, e dizer "o aviso
+         * de atraso continua valendo" seria falso no diário: `meta_atraso` só
+         * existe no flexível semanal e mensal (ver `worker/notificacoes.ts`).
+         * Num hábito diário sem lembrete, nada é enviado — e é melhor a tela
+         * dizer isso do que a pessoa descobrir pela ausência.
+         */
+        <Nota>
+          {rascunho.cadencia === "semanal" || rascunho.cadencia === "mensal" ? (
+            <>
+              Sem lembrete, não há notificação de horário. O aviso de{" "}
+              <strong className="text-texto">último dia do período</strong> continua chegando às
+              20:00 — ele não depende deste campo.
+            </>
+          ) : (
+            <>
+              Sem lembrete, este hábito{" "}
+              <strong className="text-texto">não envia notificação nenhuma</strong>. O aviso de
+              último dia do período só existe nas cadências semanal e mensal.
+            </>
+          )}
+        </Nota>
+      )}
+    </>
   );
 }
 

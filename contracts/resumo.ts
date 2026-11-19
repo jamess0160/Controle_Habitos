@@ -1,3 +1,4 @@
+import { duracaoEmTexto } from "./duracao";
 import type { ConfigHabito, Meta } from "./habito";
 
 /**
@@ -53,7 +54,7 @@ function fraseDeMeta(meta: Meta): string | null {
     case "quantificado":
       return `${meta.valor} ${meta.unidade}`;
     case "duracao":
-      return `${meta.minutos} min`;
+      return duracaoEmTexto(meta.segundos);
     case "negativo":
       return meta.tolerancia === 0
         ? "sem recaídas"

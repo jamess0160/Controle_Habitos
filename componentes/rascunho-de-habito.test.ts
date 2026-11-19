@@ -1,6 +1,11 @@
 import { configHabito, exigirValido, type Habito } from "@/contracts";
 import * as f from "@/contracts/fixtures";
-import { montarConfig, passoDoCampo, rascunhoDe } from "./rascunho-de-habito";
+import {
+  HORARIO_PADRAO_DO_LEMBRETE,
+  montarConfig,
+  passoDoCampo,
+  rascunhoDe,
+} from "./rascunho-de-habito";
 
 /**
  * O round-trip é o teste que importa.
@@ -61,6 +66,62 @@ describe("montagem de combinações que as fixtures não cobrem", () => {
     });
   });
 
+  it("a duração é somada das três partes do relógio", () => {
+    const config = montarConfig({
+      ...base,
+      tipo: "duracao",
+      duracao: { horas: "1", minutos: "", segundos: "30" },
+    });
+
+    expect(exigirValido(configHabito, config, "duração")).toMatchObject({
+      meta: { tipo: "duracao", segundos: 3_630 },
+    });
+  });
+
+  it("meta de 30 s existe — era o que o campo de minutos não deixava pedir", () => {
+    const config = montarConfig({
+      ...base,
+      tipo: "duracao",
+      duracao: { horas: "", minutos: "", segundos: "30" },
+    });
+
+    expect(exigirValido(configHabito, config, "30 s")).toMatchObject({
+      meta: { tipo: "duracao", segundos: 30 },
+    });
+  });
+
+  it("relógio inteiro em branco recusa, em vez de mandar uma meta de zero", () => {
+    const config = montarConfig({ ...base, tipo: "duracao" });
+
+    expect(configHabito.safeParse(config).success).toBe(false);
+  });
+
+  it("lembrete desativado manda `notificarEm: null`, mesmo com horário no rascunho", () => {
+    const config = montarConfig({ ...base, lembreteAtivo: false, notificarEm: "07:30" });
+
+    expect(exigirValido(configHabito, config, "sem lembrete")).toMatchObject({
+      notificarEm: null,
+    });
+  });
+
+  it("lembrete ativo manda o horário com os segundos que o contrato pede", () => {
+    const config = montarConfig({ ...base, lembreteAtivo: true, notificarEm: "07:30" });
+
+    expect(exigirValido(configHabito, config, "com lembrete")).toMatchObject({
+      notificarEm: "07:30:00",
+    });
+  });
+
+  /*
+   * Ativo e em branco é erro, e não `null` silencioso: a pessoa pediu lembrete,
+   * e salvar sem nenhum teria parecido que ela conseguiu.
+   */
+  it("lembrete ativo com horário em branco é recusado pelo schema", () => {
+    const config = montarConfig({ ...base, lembreteAtivo: true, notificarEm: "" });
+
+    expect(configHabito.safeParse(config).success).toBe(false);
+  });
+
   it("campo numérico vazio vira NaN e o schema recusa, em vez de virar zero", () => {
     const config = montarConfig({ ...base, tipo: "quantificado", valor: "", unidade: "ml" });
 
@@ -74,6 +135,22 @@ describe("montagem de combinações que as fixtures não cobrem", () => {
       modo: "flexivel",
       cadencia: { tipo: "cada_n_dias", intervalo: 15 },
     });
+  });
+});
+
+describe("o rascunho de um hábito salvo reabre com o lembrete do jeito que estava", () => {
+  it("sem `notificarEm` o botão nasce desligado, com o horário padrão à espera", () => {
+    const rascunho = rascunhoDe(f.habitoRefrigerante);
+
+    expect(rascunho.lembreteAtivo).toBe(false);
+    expect(rascunho.notificarEm).toBe(HORARIO_PADRAO_DO_LEMBRETE);
+  });
+
+  it("com `notificarEm` o botão nasce ligado, no horário salvo", () => {
+    const rascunho = rascunhoDe(f.habitoAlongar);
+
+    expect(rascunho.lembreteAtivo).toBe(true);
+    expect(rascunho.notificarEm).toBe("19:00");
   });
 });
 

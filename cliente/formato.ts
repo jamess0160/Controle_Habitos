@@ -1,5 +1,5 @@
 import type { Progresso, Saudacao } from "@/contracts";
-import { horaCurta } from "@/contracts";
+import { duracaoEmRelogio, horaCurta } from "@/contracts";
 
 /**
  * Formatação para a tela, em pt-BR.
@@ -100,7 +100,8 @@ export function textoDeProgresso(progresso: Progresso): string {
     case "quantificado":
       return `${numero(progresso.acumulado)}/${numero(progresso.meta)} ${progresso.unidade}`;
     case "duracao":
-      return `${numero(progresso.acumulado)}/${numero(progresso.meta)} min`;
+      /* Relógio, não "0/90 s": a unidade é segundo e 1500 s não se lê de relance. */
+      return `${duracaoEmRelogio(progresso.acumulado)}/${duracaoEmRelogio(progresso.meta)}`;
     case "negativo":
       return progresso.recaidas === 0
         ? "sem recaída"
@@ -135,17 +136,6 @@ export function passoDe(meta: number): number {
   const bruto = meta / 8;
   const escala = 10 ** Math.floor(Math.log10(bruto));
   return Math.max(1, Math.round(bruto / escala) * escala);
-}
-
-/** Segundos → `"mm:ss"`, ou `"h:mm:ss"` depois de uma hora. */
-export function cronometroEmTexto(segundos: number): string {
-  const total = Math.max(0, Math.floor(segundos));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  const dois = (n: number) => String(n).padStart(2, "0");
-
-  return h > 0 ? `${h}:${dois(m)}:${dois(s)}` : `${dois(m)}:${dois(s)}`;
 }
 
 /** Quanto falta de um bloqueio, em `"4 min 12 s"`. Vazio quando já passou. */

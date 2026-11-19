@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { useState } from "react";
 import { fracaoDeProgresso, horaCurta, numero, passoDe, textoDeProgresso } from "@/cliente/formato";
-import type { LinhaDeHoje, Origem } from "@/contracts";
+import { duracaoEmTexto, type LinhaDeHoje, type Origem } from "@/contracts";
+import { CampoDeDuracao } from "./campo-de-duracao";
 import { CLASSE_COR } from "./cor";
 import { Cronometro } from "./cronometro";
+import { DURACAO_VAZIA, segundosDePartes, type PartesDeDuracao } from "./duracao";
 import { Marca } from "./marca";
 import { Sequencia } from "./sequencia";
 import { Botao, CLASSE_ENTRADA } from "./ui";
@@ -215,7 +217,7 @@ function Desfazer({
     linha.progresso.tipo === "quantificado"
       ? `Desfazer os últimos ${numero(registro.valor)} ${linha.progresso.unidade}`
       : linha.progresso.tipo === "duracao"
-        ? `Desfazer os últimos ${numero(registro.valor)} min`
+        ? `Desfazer os últimos ${duracaoEmTexto(registro.valor)}`
         : linha.progresso.tipo === "negativo"
           ? "Desfazer a última recaída"
           : "Desmarcar";
@@ -307,31 +309,35 @@ function PainelDuracao({
   readonly ocupado: boolean;
   readonly aoRegistrar: (valor: number, origem: Origem) => void;
 }) {
-  const [minutos, setMinutos] = useState("");
-  const numerico = Number(minutos);
-  const valido = minutos !== "" && Number.isFinite(numerico) && numerico > 0;
+  const [partes, setPartes] = useState<PartesDeDuracao>(DURACAO_VAZIA);
+  const segundos = segundosDePartes(partes);
+  const valido = Number.isFinite(segundos) && segundos > 0;
 
   return (
     <div className="flex flex-col gap-4">
       <Cronometro
         habitoId={habitoId}
         ocupado={ocupado}
-        aoParar={(min) => aoRegistrar(min, "cronometro")}
+        aoParar={(decorridos) => aoRegistrar(decorridos, "cronometro")}
       />
 
       <div className="flex items-end gap-2 border-t border-linha pt-3">
-        <label className="flex-1">
-          <span className="mb-1 block text-xs text-texto-fraco">ou informe os minutos</span>
-          <input
-            type="number"
-            inputMode="numeric"
-            min={1}
-            value={minutos}
-            onChange={(e) => setMinutos(e.target.value)}
-            className={`${CLASSE_ENTRADA} tabular-nums`}
+        <div className="flex-1">
+          <CampoDeDuracao
+            rotulo="ou informe o tempo"
+            partes={partes}
+            aoMudar={setPartes}
           />
-        </label>
-        <Botao disabled={ocupado || !valido} onClick={() => aoRegistrar(numerico, "app")}>
+        </div>
+        <Botao
+          disabled={ocupado || !valido}
+          onClick={() => {
+            aoRegistrar(segundos, "app");
+            /* O painel fica aberto para a próxima sessão; o campo não deve
+               reaparecer com o tempo que já foi registrado. */
+            setPartes(DURACAO_VAZIA);
+          }}
+        >
           Registrar
         </Botao>
       </div>

@@ -465,12 +465,12 @@ describe("tipos de hábito", () => {
     ]);
   });
 
-  it("duração acumula minutos de várias sessões", () => {
-    const meditar = config({ meta: { tipo: "duracao", minutos: 10 } });
+  it("duração acumula segundos de várias sessões", () => {
+    const meditar = config({ meta: { tipo: "duracao", segundos: 600 } });
 
     const resultado = rodar({
       configs: [meditar],
-      registros: [reg("2026-11-01", 4), reg("2026-11-01", 6)],
+      registros: [reg("2026-11-01", 240), reg("2026-11-01", 360)],
       hoje: "2026-11-02",
     });
 

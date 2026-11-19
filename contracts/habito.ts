@@ -91,7 +91,8 @@ const metaQuantificado = z.strictObject({
 
 const metaDuracao = z.strictObject({
   tipo: z.literal("duracao"),
-  minutos: z.int().positive("A meta precisa ser maior que zero."),
+  /** Segundos inteiros, e nunca minuto fracionário — ver `contracts/duracao.ts`. */
+  segundos: z.int().positive("A meta precisa ser maior que zero."),
 });
 
 const metaNegativo = z.strictObject({

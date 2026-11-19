@@ -35,6 +35,7 @@ export const progresso = z.discriminatedUnion("tipo", [
   }),
   z.object({
     tipo: z.literal("duracao"),
+    /** Os dois em **segundos** inteiros — ver `contracts/duracao.ts`. */
     acumulado: z.int().min(0),
     meta: z.int().positive(),
   }),

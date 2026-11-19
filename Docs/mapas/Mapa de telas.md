@@ -80,9 +80,9 @@ Tela inicial. Foco no que é devido hoje, com **a sequência de cada hábito na 
 
 **Sequência por hábito** — cada linha mostra `🔥 sequencia_atual` e `❄ congelamentos disponíveis`. O 🔥 é o indicador de interações consecutivas concluídas no prazo daquele hábito; em modo `fixo` conta ocorrências, em `flexivel` conta períodos. O recorde e o total histórico ficam na tela de detalhe (onda 2), não aqui.
 
-**Lista de hoje** — uma linha por interação devida, não por hábito: um hábito `fixo` com dois horários rende duas linhas, cada uma marcável, ambas exibindo a mesma sequência do hábito. A ordem segue `habito.ordem`. Cada linha mostra o progresso na forma própria do tipo (contagem, volume, minutos, ou "sem recaída" no negativo). Toque curto marca; toque na linha abre o retroativo daquele hábito.
+**Lista de hoje** — uma linha por interação devida, não por hábito: um hábito `fixo` com dois horários rende duas linhas, cada uma marcável, ambas exibindo a mesma sequência do hábito. A ordem segue `habito.ordem`. Cada linha mostra o progresso na forma própria do tipo (contagem, volume, relógio `mm:ss` na duração, ou "sem recaída" no negativo). Toque curto marca; toque na linha abre o retroativo daquele hábito.
 
-Ações por tipo: `binario` marca direto; `quantificado` abre incremento rápido com o passo da unidade; `duracao` oferece cronômetro ou entrada manual de minutos; `negativo` registra recaída (ação destrutiva, com confirmação).
+Ações por tipo: `binario` marca direto; `quantificado` abre incremento rápido com o passo da unidade; `duracao` oferece cronômetro ou entrada manual num relógio `h : min : s`; `negativo` registra recaída (ação destrutiva, com confirmação).
 
 **Bloco de avisos** — informativo e dispensável, aparece quando um período fechou recentemente como `congelado` ou `falhou`. Substitui o antigo bloco "em risco", que deixou de existir com o consumo automático de congelamento: não há mais nada a decidir no prazo, só a comunicar.
 
@@ -94,7 +94,7 @@ Precisa sobreviver ao app **minimizado**, mas não ao app **fechado**. Isso defi
 
 - guardar `iniciado_em` (timestamp absoluto) em `sessionStorage`, que morre junto com a PWA fechada — exatamente o comportamento desejado, e nada de linha no banco para timer em andamento;
 - o tempo exibido é sempre `agora - iniciado_em`, recalculado em `visibilitychange`. **Nunca acumular por ticks de `setInterval`**: o navegador estrangula timers em segundo plano e a contagem chegaria errada ao voltar;
-- ao parar, grava um `registro` com os minutos decorridos e `origem = 'cronometro'`;
+- ao parar, grava um `registro` com os **segundos** decorridos e `origem = 'cronometro'`, sem arredondar — arredondar para o minuto gravava 40 s como 1 min, e o cronômetro media melhor do que conseguia guardar;
 - app fechado com cronômetro rodando descarta a sessão em andamento — comportamento explícito na interface antes de iniciar, para não parecer perda de dados.
 
 ## 4. Lista de hábitos
@@ -110,13 +110,15 @@ Ações: criar, editar, pausar/retomar, arquivar/desarquivar e abrir o retroativ
 Formulário em etapas, porque a configuração é grande o bastante para não caber de uma vez.
 
 1. **Identidade** — nome e cor (paleta fechada). **Não há campo de ícone**: o emoji de sinalização é digitado dentro do próprio nome (`💧 Água`), aproveitando o teclado de emoji do sistema em vez de um seletor próprio.
-2. **Tipo** — binário, quantificado (valor + unidade), duração (minutos) ou negativo (tolerância de recaídas). Define quais campos de meta aparecem adiante.
+2. **Tipo** — binário, quantificado (valor + unidade), duração (relógio `h : min : s`, guardado em segundos) ou negativo (tolerância de recaídas). Define quais campos de meta aparecem adiante. O campo de duração é um relógio e não um número de minutos: a unidade é o segundo, e três campos de texto distinguem "vazio" de "zero", o que um `<input type="time">` — hora do dia, limitado a 23:59 e sem segundos na maioria dos navegadores — não faz.
 3. **Cadência** — diário, a cada N dias, semanal ou mensal. Em "a cada N dias", explicar na tela que a contagem reinicia **na última conclusão**: concluir no 3º dia de uma janela de 15 joga o próximo vencimento para 15 dias depois daquela conclusão.
 4. **Modo** — escolha excludente entre *flexível* ("N vezes no período") e *fixo* ("nestes dias e horários"). A tela precisa deixar claro que são caminhos alternativos; é o ponto em que o modelo antigo de "período externo + interno" gerava combinação inválida. Em cadência "a cada N dias" o modo fixo não é oferecido.
-5. **Notificação** — horário do lembrete. No modo `fixo`, derivado dos horários já informados.
+5. **Notificação** — o lembrete é **opt-in explícito**: um botão *Ativar* / *Sem lembrete*, e o campo de horário só aparece ativado. "Deixe em branco para não receber" fazia o campo perguntar *quando* quando a pergunta era *se*, e um `<input type="time">` vazio é indistinguível de um campo ainda não preenchido. Ativado com o horário em branco é erro de validação, não silêncio. No modo `fixo`, derivado dos horários já informados.
 6. **Congelamento** — ativar, a cada quantas interações ganha um, e o estoque máximo. Mostrar em texto o efeito **e o automatismo**: "a cada 3 interações no prazo você ganha 1 congelamento, até 2 guardados; se você perder um período, um congelamento é usado automaticamente para manter a sequência".
 
 O resumo final descreve a regra em uma frase antes de salvar.
+
+**Depois de criar, o formulário é zerado** e volta ao passo 1 antes de a tela sair para a lista. `router.replace` troca a rota, não o estado do componente: quando ele sobrevive à navegação, o cadastro seguinte abria com o hábito anterior inteiro dentro, no passo em que o anterior terminou — e recarregar a página era o único jeito de limpar. Na **edição** não se zera: o formulário continua sendo o daquele hábito.
 
 **Ao editar**, avisar que a mudança vale a partir de hoje e que o histórico continua avaliado pela regra antiga — é o comportamento de versionamento, e sem aviso parece bug.
 
@@ -159,7 +161,7 @@ Efeitos que a tela precisa comunicar na hora: a sequência foi recalculada, e um
 Visão de longo prazo que o retroativo de 7 dias não cobre. Fica fora da primeira entrega, mas mapeada para o schema nascer compatível:
 
 - heatmap anual de períodos, com `cumprido` / `congelado` / `falhou` distinguíveis;
-- evolução do valor em hábito `quantificado` e dos minutos em `duracao`;
+- evolução do valor em hábito `quantificado` e do tempo em `duracao`;
 - linha do tempo da sequência, com recorde e `total_no_prazo`;
 - histórico de congelamentos: quando foi ganho, em que período foi gasto, quando foi estornado;
 - preenchimento retroativo de qualquer data da janela permitida, a partir do heatmap.

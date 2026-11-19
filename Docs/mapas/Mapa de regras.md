@@ -35,8 +35,10 @@ O tipo define o que significa "cumprir" e qual campo de meta é usado.
 |---|---|---|---|
 | `binario` | — | existe 1 registro | Fazer a cama |
 | `quantificado` | `meta_valor` + `unidade` | soma dos registros ≥ meta | Beber 2 L de água |
-| `duracao` | `meta_minutos` | soma dos minutos ≥ meta | Meditar 10 min |
+| `duracao` | `meta_segundos` | soma dos segundos ≥ meta | Meditar 10 min, respirar 30 s |
 | `negativo` | `tolerancia_recaidas` (padrão 0) | nº de registros ≤ tolerância | Não fumar |
+
+> **A meta de duração é em segundos inteiros.** Era em minutos inteiros, e com isso a meta mais curta expressável era 1 min — "respirar 30 s" e "prancha de 45 s" não cabiam. Minuto fracionário resolveria a entrada e quebraria a avaliação: a meta é cumprida por **soma de registros**, 20 s seriam `0.3333…`, e três sessões de 20 s somariam `0.99999…` contra uma meta de 1 min, fechando o período **perdido** com o tempo cumprido. Em segundo inteiro a soma é exata. O cronômetro grava o segundo decorrido, sem arredondar.
 
 O hábito `negativo` inverte a lógica: a ocorrência nasce **cumprida** e o registro representa uma recaída, não um sucesso. Consequência: ele só pode falhar por ação explícita sua, nunca por omissão — e, por isso, nunca consome congelamento.
 

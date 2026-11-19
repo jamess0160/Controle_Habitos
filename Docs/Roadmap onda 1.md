@@ -428,16 +428,16 @@ O log é o `stdout`: num contêiner do compose é o que `docker logs` guarda com
 
 Executados por você. Entrego um roteiro em `Docs/Roteiro de testes.md` antes desta etapa começar, cobrindo:
 
-- [ ] primeiro acesso, cadastro de biometria, reentrada por biometria, senha recusada depois de desativada
-- [ ] reset pela interface e reset pela CLI, com reentrada após cada um
-- [ ] um hábito de cada tipo e de cada cadência, do cadastro ao fechamento do período
-- [ ] marcação perto da virada das 04:00
-- [ ] sequência subindo, congelamento sendo ganho, gasto automaticamente e esgotado
-- [ ] retroativo marcando, desmarcando e estornando congelamento
-- [ ] `cada_n_dias`: conclusão antecipada e retroativo movendo vencimentos
-- [ ] pausa agendada e aberta, arquivar e desarquivar
+- [x] primeiro acesso, cadastro de biometria, reentrada por biometria, senha recusada depois de desativada
+- [x] reset pela interface e reset pela CLI, com reentrada após cada um
+- [x] um hábito de cada tipo e de cada cadência, do cadastro ao fechamento do período
+- [x] marcação perto da virada das 04:00
+- [x] sequência subindo, congelamento sendo ganho, gasto automaticamente e esgotado
+- [x] retroativo marcando, desmarcando e estornando congelamento
+- [x] `cada_n_dias`: conclusão antecipada e retroativo movendo vencimentos
+- [x] pausa agendada e aberta, arquivar e desarquivar
 - [ ] notificações reais no celular, com a PWA instalada e com ela fechada
-- [ ] reordenação persistindo
+- [x] reordenação persistindo
 
 Para não esperar dias por um fechamento de período, o worker ganha um modo de execução manual que aceita um instante simulado — necessário para testar à mão o que depende de calendário.
 

@@ -1,10 +1,14 @@
-# Compose de produção: cinco serviços no homelab, nenhuma porta publicada.
+# Compose de produção: quatro serviços no homelab, nenhuma porta publicada.
 #
-# ┌─────────────┐   túnel saindo    ┌────────────┐
-# │ cloudflared │ ────────────────▶ │ Cloudflare │ ◀── celular, pelo domínio
-# └──────┬──────┘                   └────────────┘
-#        │ http://app:3000 (rede interna do compose)
-# ┌──────▼──────┐      ┌────────┐      ┌──────────┐
+#                                   ┌────────────┐
+#                                   │ Cloudflare │ ◀── celular, pelo domínio
+#                                   └─────▲──────┘
+#   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┼ ─ ─ túnel saindo ─ ─ ─ ─ ─ ─ ─ ─
+#   ┌─────────────────────────┐           │
+#   │ cloudflared do homelab  │ ──────────┘      FORA desta pilha: é o túnel
+#   └──────┬──────────────────┘                  que já administra as rotas
+#          │ http://app:3000                     da conta. Ver `networks`.
+# ┌────────▼────┐      ┌────────┐      ┌──────────┐
 # │     app     │      │ worker │      │ migrate  │ (roda uma vez e sai)
 # └──────┬──────┘      └───┬────┘      └────┬─────┘
 #        └────────────┬────┴────────────────┘
@@ -18,6 +22,10 @@
 # header, onde `ipDoPedido()` cai em 127.0.0.1 para todo mundo: o bloqueio por IP
 # viraria um bloqueio global, e cinco erros de digitação trancariam o app
 # inclusive para quem sabe a senha. O único caminho de entrada é o túnel.
+#
+# É por isso que o cloudflared entra numa REDE do compose em vez de apontar para
+# uma porta do host: o header continua sendo escrito pelo Cloudflare e não há
+# caminho alternativo até o app. Ver o bloco `networks` no fim do arquivo.
 #
 # Variáveis: copie `.env.producao.example` para `.env` ao lado deste arquivo.
 
@@ -62,6 +70,7 @@ services:
       # deles no host depende da permissão do DIRETÓRIO, não do arquivo, então a
       # retenção de infra/backup.sh funciona sem root.
       - ${HABITO_BACKUP_DIR:-/var/backups/controle-habito}:/backups
+    networks: [interna]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-habito} -d ${POSTGRES_DB:-controle_habito}"]
       interval: 10s
@@ -86,6 +95,7 @@ services:
     env_file: .env
     environment: *ambiente-do-app
     command: ["sh", "infra/migrar.sh"]
+    networks: [interna]
     depends_on:
       postgres:
         condition: service_healthy
@@ -99,10 +109,14 @@ services:
     restart: unless-stopped
     env_file: .env
     environment: *ambiente-do-app
-    # `expose` e não `ports`: visível para o cloudflared, invisível para a rede
-    # do host. Ver a nota no topo.
+    # `expose` e não `ports`: visível para quem está na rede `borda` — o
+    # cloudflared do homelab —, invisível para a rede do host. Ver a nota no topo.
     expose:
       - "3000"
+    # O único serviço nas duas: `interna` para falar com o Postgres, `borda` para
+    # o túnel o alcançar. O worker não entra na `borda` porque nada de fora
+    # precisa chamá-lo.
+    networks: [interna, borda]
     depends_on:
       postgres:
         condition: service_healthy
@@ -135,30 +149,61 @@ services:
     # de carência padrão do Docker não bastam para a virada das 04:00 de um banco
     # com histórico.
     stop_grace_period: 90s
+    networks: [interna]
     depends_on:
       postgres:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
 
-  cloudflared:
-    # `latest` de propósito, e é o único serviço aqui onde isso se defende: o
-    # cloudflared é um cliente que conversa com a borda do Cloudflare, e uma
-    # versão parada acaba recusada. `--no-autoupdate` porque quem atualiza é o
-    # `docker compose pull`, não o binário se trocando por dentro de um contêiner
-    # imutável.
-    image: cloudflare/cloudflared:latest
-    container_name: habito_tunel
-    restart: unless-stopped
-    command: ["tunnel", "--no-autoupdate", "run"]
-    environment:
-      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?defina TUNNEL_TOKEN no .env — o token do túnel criado no painel do Cloudflare}
-      TZ: ${TZ:-America/Sao_Paulo}
-    depends_on:
-      app:
-        condition: service_healthy
-
 volumes:
   # Nomeado, e o nome completo é `controle-habito_postgres` (o `name:` do topo
   # vira prefixo). É o que o backup e a restauração em infra/ pressupõem.
   postgres:
+
+# Duas redes, e a divisão é o contrato com o túnel.
+#
+# **Não há serviço `cloudflared` nesta pilha.** O homelab já roda um, com o
+# token da conta e todas as rotas num lugar só; um segundo túnel seria uma
+# segunda credencial para administrar e um segundo lugar onde olhar quando o
+# domínio não responde. O que esta pilha faz é oferecer uma rede para ele entrar.
+#
+# `name:` explícito nas duas de propósito: sem ele o compose prefixaria com o
+# `name:` do topo, e o nome que se digita do lado do cloudflared mudaria se o
+# projeto fosse renomeado. Estes dois nomes são a interface pública daqui.
+networks:
+  # Onde os quatro serviços se falam. O Postgres só existe aqui.
+  interna:
+    name: controle-habito-interna
+
+  # A entrada, e o único serviço nela é o `app`.
+  #
+  # Crie-a uma vez, à mão, antes da primeira subida:
+  #
+  #     docker network create controle-habito-borda
+  #
+  # `external: true` porque ela é de DUAS pilhas e de nenhuma: o cloudflared do
+  # homelab também a declara. Deixá-la gerenciada por este compose faria um
+  # `docker compose down` daqui levar embora a rede que o túnel usa, e a pilha
+  # dele passaria a não subir — por uma dependência que não está escrita em
+  # lugar nenhum do lado dele. Externa, cada lado só a referencia.
+  #
+  # Do lado do cloudflared, declare assim (e não com
+  # `docker network connect`, que é um vínculo perdido no próximo recreate dele,
+  # devolvendo 502 no domínio sem nada ter mudado deste lado):
+  #
+  #     networks:
+  #       habito:
+  #         external: true
+  #         name: controle-habito-borda
+  #
+  # Com ele na rede, o Public Hostname aponta para `http://app:3000`: o compose
+  # registra o nome do serviço como alias de DNS em cada rede que o serviço
+  # participa, e o DNS interno do Docker resolve isso para qualquer contêiner da
+  # mesma rede, inclusive os de fora desta pilha. `habito_app:3000` também vale.
+  #
+  # Duas redes e não uma porque uma só daria ao cloudflared acesso ao Postgres
+  # junto. Ele precisa alcançar uma porta HTTP; não precisa alcançar o banco.
+  borda:
+    external: true
+    name: controle-habito-borda

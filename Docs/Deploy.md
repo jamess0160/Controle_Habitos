@@ -11,16 +11,20 @@ O comportamento do app está nos [mapas](mapas/); aqui está só a operação.
 ## O que sobe
 
 ```
-┌─────────────┐   túnel saindo    ┌────────────┐
-│ cloudflared │ ────────────────▶ │ Cloudflare │ ◀── celular, pelo domínio
-└──────┬──────┘                   └────────────┘
-       │ http://app:3000 (rede interna do compose)
-┌──────▼──────┐      ┌────────┐      ┌─────────┐
+                                  ┌────────────┐
+                                  │ Cloudflare │ ◀── celular, pelo domínio
+                                  └─────▲──────┘
+ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│─ ─ ─ túnel saindo ─ ─ ─ ─ ─ ─ ─ ─ ─
+┌────────────────────────┐              │     cloudflared do homelab: já de pé,
+│ cloudflared (do host)  │ ─────────────┘     NÃO é um serviço desta pilha
+└───────┬────────────────┘
+        │ http://app:3000  (rede `controle-habito-borda`)
+┌───────▼─────┐      ┌────────┐      ┌─────────┐
 │     app     │      │ worker │      │ migrate │ (roda uma vez e sai)
 └──────┬──────┘      └───┬────┘      └────┬────┘
        └────────────┬────┴────────────────┘
-              ┌─────▼────┐
-              │ postgres │  volume nomeado, sem porta no host
+              ┌─────▼────┐    rede `controle-habito-interna`
+              │ postgres │    volume nomeado, sem porta no host
               └──────────┘
 ```
 
@@ -30,7 +34,12 @@ O comportamento do app está nos [mapas](mapas/); aqui está só a operação.
 | `migrate` | `--target worker` | `migrate latest` + `seed`, e sai. Roda antes de app e worker |
 | `app` | `--target app` | o Next empacotado (`output: "standalone"`), `node server.js` |
 | `worker` | `--target worker` | o tique de 1 minuto: virada das 04:00, notificações, limpeza |
-| `cloudflared` | `cloudflare/cloudflared` | o túnel. É o único caminho de entrada |
+
+**O túnel não está na lista, e é de propósito.** O homelab já roda um
+cloudflared, com o token da conta e todas as rotas num lugar só; um segundo
+túnel seria uma segunda credencial para administrar e um segundo lugar onde
+olhar quando o domínio não responde. Esta pilha não o sobe — ela oferece uma
+**rede** para ele entrar, e o passo 2 liga as duas pontas.
 
 **Nenhuma porta é publicada no host, e isso é segurança.** O rate limiting conta
 tentativas de login por `CF-Connecting-IP`, header que só o Cloudflare escreve
@@ -39,6 +48,16 @@ faria `ipDoPedido()` devolver `127.0.0.1` para todo mundo: o bloqueio por IP
 viraria bloqueio global, e cinco erros de digitação trancariam o app inclusive
 para quem sabe a senha. Se um dia precisar alcançar o app na rede local, use um
 túnel SSH, não um `ports:`.
+
+É por isso que o cloudflared entra numa rede do Docker em vez de apontar para
+`http://localhost:3000`: um `ports: 127.0.0.1:3000:3000` funcionaria, e daria um
+segundo caminho até o app — sem `CF-Connecting-IP` — para qualquer processo do
+host. Pela rede não há caminho alternativo nenhum.
+
+As duas redes são `controle-habito-interna` (os quatro serviços; o Postgres só
+existe aqui) e `controle-habito-borda`, onde o único serviço é o `app`. O
+cloudflared entra só na segunda: ele precisa alcançar uma porta HTTP, não o
+banco.
 
 Duas imagens de um [Dockerfile](../Dockerfile) só, porque as necessidades são
 opostas: o app quer o mínimo que o rastreamento do Next provou necessário, e o
@@ -83,6 +102,9 @@ Um Linux com:
 - **Docker Engine + Compose v2** (`docker compose version` responde);
 - **git**;
 - um domínio no Cloudflare, com a zona ativa na mesma conta;
+- **um cloudflared já rodando em contêiner** no mesmo host, com um túnel ativo.
+  Se não houver, crie um (Zero Trust › Networks › Tunnels › Create a tunnel ›
+  Docker) e o suba com a rede `controle-habito-borda` — o passo 2 mostra como;
 - `openssl`, para gerar as senhas (ou qualquer gerador que você confie).
 
 Node, npm e cliente do Postgres **não** são necessários no host: tudo que precisa
@@ -100,14 +122,46 @@ git clone <url-do-repo> /opt/controle-habito
 cd /opt/controle-habito
 ```
 
-### 2. Criar o túnel no Cloudflare
+### 2. Ligar o cloudflared que já roda no homelab
 
-No painel: **Zero Trust › Networks › Tunnels › Create a tunnel › Cloudflared**.
-Dê um nome, escolha **Docker** e copie o **token** (a string longa que aparece
-depois de `--token`). Não precisa rodar o comando que o painel mostra — o compose
-já o faz.
+São três coisas: criar a rede compartilhada, pôr o cloudflared nela, e apontar um
+Public Hostname para o app.
 
-Ainda no túnel, em **Public Hostname**, adicione:
+**2a. A rede.** Uma vez, no host:
+
+```bash
+docker network create controle-habito-borda
+```
+
+Ela é declarada `external: true` nos dois lados justamente para não ser de
+ninguém: se este compose a gerenciasse, um `docker compose down` aqui levaria
+embora a rede do túnel, e a pilha do cloudflared passaria a não subir por uma
+dependência que não está escrita em lugar nenhum do lado dela.
+
+**2b. O cloudflared entra na rede.** No compose **dele**, acrescente a rede ao
+serviço e declare-a externa:
+
+```yaml
+services:
+  cloudflared:
+    # ... o que já existe
+    networks:
+      - habito          # junto das redes que ele já tem
+
+networks:
+  habito:
+    external: true
+    name: controle-habito-borda
+```
+
+E recrie: `docker compose up -d` na pasta dele.
+
+> **Não use `docker network connect habito-borda <contêiner>`** como solução
+> final. Funciona na hora, e é o jeito de testar, mas é um vínculo que se perde
+> no próximo `up -d` do cloudflared — o domínio volta a dar 502 sem nada ter
+> mudado deste lado, e o erro aparece dias depois do que o causou.
+
+**2c. O Public Hostname.** No painel, no túnel que já existe:
 
 | Campo | Valor |
 |---|---|
@@ -116,8 +170,13 @@ Ainda no túnel, em **Public Hostname**, adicione:
 | Type | `HTTP` |
 | URL | `app:3000` |
 
-`app:3000` é o nome do serviço na rede do compose, não um IP — o cloudflared
-resolve pelo DNS interno do Docker.
+`app:3000` é nome de serviço na rede do Docker, não um IP: o compose registra o
+nome do serviço como alias de DNS em cada rede que ele participa, e o DNS interno
+resolve isso para qualquer contêiner da mesma rede — inclusive um de fora desta
+pilha. `habito_app:3000` (o `container_name`) também vale.
+
+Como o `app` ainda não existe, o hostname vai dar 502 até o passo 5. Isso é
+esperado.
 
 O TLS é do Cloudflare e é automático. WebAuthn exige HTTPS, e é daqui que ele vem.
 
@@ -143,8 +202,9 @@ openssl rand -hex 32      # POSTGRES_PASSWORD  (hex de propósito: entra numa UR
 openssl rand -base64 18   # APP_SENHA_INICIAL
 ```
 
-Preencha também `RP_ID`, `TUNNEL_TOKEN` e `APP_USUARIO_NOME`, e confirme
-`APP_MODO=producao`.
+Preencha também `RP_ID` e `APP_USUARIO_NOME`, e confirme `APP_MODO=producao`.
+Não há variável de túnel aqui — o token é do cloudflared do homelab e fica na
+configuração dele.
 
 **`RP_ID` é a linha para conferir duas vezes** — é o hostname exato, sem
 `https://` e sem barra no fim. Ele vem vazio no exemplo justamente para não haver
@@ -187,8 +247,11 @@ docker compose up -d --build
 ```
 
 A primeira vez compila as duas imagens (alguns minutos). A ordem é garantida pelo
-compose: `app` e `worker` só sobem depois do `migrate` terminar **com sucesso**, e
-o `cloudflared` só depois do `app` ficar saudável.
+compose: `app` e `worker` só sobem depois do `migrate` terminar **com sucesso**,
+então ninguém roda sobre schema velho.
+
+Se o compose reclamar que `controle-habito-borda` não foi encontrada, é o passo
+2a que ficou para trás.
 
 Confira:
 
@@ -197,6 +260,29 @@ docker compose ps                    # app healthy, worker up, migrate exited (0
 docker compose logs migrate          # as 9 migrations e os seeds
 docker compose logs -f app worker
 ```
+
+E confira as duas pontas da rede. Primeiro que o nome resolve e responde de
+dentro dela:
+
+```bash
+docker run --rm --network controle-habito-borda alpine \
+  wget -q -O- http://app:3000/api/auth/estado
+```
+
+Um JSON de volta significa que o alias de DNS e a porta estão certos.
+`wget: bad address 'app'` com o `app` saudável é rede errada no serviço.
+
+Depois que o cloudflared está mesmo nela:
+
+```bash
+docker network inspect controle-habito-borda \
+  --format '{{range .Containers}}{{println .Name}}{{end}}'
+```
+
+Tem de listar `habito_app` **e** o contêiner do cloudflared. Se o segundo não
+aparecer, o passo 2b não pegou — ou a pilha dele não foi recriada depois da
+edição. Não tente o teste de dentro do contêiner do cloudflared: a imagem oficial
+é distroless, sem `sh` e sem `wget`, e o erro pareceria ser de rede.
 
 ### 6. Primeiro acesso — no aparelho que vai guardar a passkey
 
@@ -240,7 +326,6 @@ testada**.
 | `RP_ID`, `RP_NAME` | seed → `config_app` | **gravados uma vez**; editar depois não muda nada |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | seed → `config_app` | idem. O envio lê do banco, não do ambiente |
 | `VAPID_SUBJECT` | seed → `config_app` | vazio = `https://<RP_ID>` |
-| `TUNNEL_TOKEN` | cloudflared | a credencial inteira do túnel |
 | `TZ` | contêineres | só o carimbo do `docker logs` — ver abaixo |
 | `HABITO_BACKUP_DIR` | compose, scripts | o mesmo valor nos dois |
 | `HABITO_BACKUP_RETENCAO` | `infra/backup.sh` | dias; nunca apaga os 4 mais novos |
@@ -249,6 +334,11 @@ testada**.
 `config_app.timezone` pelo `Intl` ([servidor/relogio.ts](../servidor/relogio.ts)),
 justamente para não herdar o fuso do processo. Mudar o fuso do app é na tela de
 Ajustes.
+
+**Não há variável de túnel.** O token é do cloudflared do homelab e vive na
+configuração dele; o contrato entre as duas pilhas é a rede
+`controle-habito-borda`, não uma credencial copiada. Uma consequência boa: nem
+este `.env` nem um dump deste banco carregam credencial de túnel.
 
 **Por que tanta coisa é lida do banco e não do ambiente:** o `.env` muda junto com
 o deploy, e a passkey gravada no celular não. `rp_id` e o par VAPID precisam
@@ -260,12 +350,14 @@ NOTHING` e a partir daí o banco manda.
 ## Operação
 
 ```bash
-docker compose ps                          # estado dos cinco
+docker compose ps                          # estado dos quatro
 docker compose logs -f worker              # o tique; silencioso quando não há evento
 docker compose logs -f app
 docker compose logs --since 24h worker     # a virada das 04:00 de hoje
-docker compose logs cloudflared            # "Registered tunnel connection" = túnel de pé
 ```
+
+O log do túnel não está aqui: ele é da pilha do cloudflared, e é lá que se olha
+quando o domínio não responde mas o `app` está saudável.
 
 O worker só escreve linha quando acontece algo — ele roda 1440 vezes por dia, e um
 log por tique enterraria o que importa.
@@ -448,6 +540,8 @@ Se os cinco passos fecharem, o backup é um backup.
 | `migrate` reclama de `APP_SENHA_INICIAL` | primeira subida com a variável vazia |
 | `app` fica `unhealthy` | o healthcheck chama `/api/auth/estado`, que consulta o banco; `docker compose logs app` mostra o erro por trás |
 | túnel de pé, `502` no domínio | o Public Hostname aponta para algo que não é `app:3000`, ou o `app` ainda não está saudável |
+| `502` depois de meses funcionando, sem deploy aqui | o cloudflared saiu da rede `controle-habito-borda`: a ligação foi feita com `docker network connect` em vez de declarada no compose dele, e um recreate a desfez. `docker network inspect controle-habito-borda` lista quem está dentro |
+| `network controle-habito-borda declared as external, but could not be found` | o `docker network create` do passo 2a |
 | app sem CSS, PWA não instala | `.next/static` ou `public/` não foram para a imagem — rebuild sem cache |
 | a tela de login mostra o aviso de modo desenvolvimento | `APP_MODO` no `.env` do servidor não é `producao` |
 | biometria recusada depois de ter funcionado | o `rp_id` em `config_app` não é o domínio em uso |

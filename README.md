@@ -49,7 +49,9 @@ cp .env.producao.example .env     # no servidor
 docker compose up -d --build
 ```
 
-Cinco serviços: `postgres`, `migrate` (de passagem), `app`, `worker`,
-`cloudflared`. Nenhuma porta publicada no host — o único caminho de entrada é o
-túnel, e o rate limiting depende disso. O passo a passo, incluindo o túnel, o
-primeiro acesso e o backup verificado, está em **[Docs/Deploy.md](Docs/Deploy.md)**.
+Quatro serviços: `postgres`, `migrate` (de passagem), `app` e `worker`. O túnel
+**não** está na pilha — é o cloudflared que já roda no homelab, ligado à rede
+`controle-habito-borda`, onde o `app` é o único serviço. Nenhuma porta publicada
+no host: o único caminho de entrada é o túnel, e o rate limiting depende disso.
+O passo a passo, incluindo a ligação do túnel, o primeiro acesso e o backup
+verificado, está em **[Docs/Deploy.md](Docs/Deploy.md)**.

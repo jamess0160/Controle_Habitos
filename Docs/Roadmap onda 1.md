@@ -347,7 +347,7 @@ Isso obrigou uma correção no cálculo otimista do cliente: `comRegistro` somav
 **Fechada quando** os 26 casos de [retroativo.test.ts](../servidor/retroativo.test.ts) passam, com destaque para o cenário de estorno montado por marcações reais: seis dias de história, um congelamento a cada dois dias cumpridos, um buraco que o fechamento resgata gastando um congelamento — e o preenchimento do buraco fazendo o replay não gastar.
 
 ### 3.5 Worker e notificações
-- [x] processo separado, tick de 1 minuto (`npm run worker`) — **o serviço no compose sai na etapa 5**, junto do Dockerfile e do cloudflared; escrevê-lo agora seria montar metade da stack duas vezes
+- [x] processo separado, tick de 1 minuto (`npm run worker`) — **o serviço no compose sai na etapa 5**, junto do Dockerfile e do compose; escrevê-lo agora seria montar metade da stack duas vezes
 - [x] fechamento de período, geração do próximo, ganho de congelamento
 - [x] push com VAPID e service worker; `lembrete`, `meta_atraso`, `congelamento_usado`, `sequencia_perdida`
 - [x] idempotência via `notificacao_enviada`; baixa de `push_subscription` em 404/410
@@ -458,7 +458,7 @@ Dividida em duas: o que se escreve no repositório, e o que só existe com o ser
 ### 5.1 Preparação (no repositório)
 
 - [x] `output: 'standalone'` no [next.config.ts](../next.config.ts) e [Dockerfile](../Dockerfile) multi-stage
-- [x] `docker-compose.yml` de produção: `postgres`, `migrate`, `app`, `worker`, `cloudflared`
+- [x] `docker-compose.yml` de produção: `postgres`, `migrate`, `app`, `worker` — e o túnel **fora** da pilha
 - [x] migrations aplicadas na subida, antes de app e worker existirem
 - [x] `infra/backup.sh` com `pg_dump` verificado e retenção, e `infra/restaurar.sh`
 - [x] `.env.producao.example` separado do de desenvolvimento
@@ -467,7 +467,17 @@ Dividida em duas: o que se escreve no repositório, e o que só existe com o ser
 
 **Duas imagens de um Dockerfile só.** `--target app` é o standalone do Next; `--target worker` é TypeScript cru sob `tsx`, e atende o tique de um minuto, as migrations e as CLIs de reset. São duas porque as necessidades são opostas: o app quer só o que o rastreamento provou necessário, o worker precisa de `node_modules` de verdade. É também por isso que **`tsx` saiu de `devDependencies` para `dependencies`** — `next build` compila o grafo do app, e `tsc` não reescreveria os aliases `@/*` na saída, então um `require("@/db/knex")` emitido não resolveria. Compilar exigiria um segundo bundler para três entradas que não são o app.
 
-As duas imagens foram construídas e a pilha foi exercitada local­mente — `migrate` aplicando as 9 migrations e os seeds de produção (com o de desenvolvimento se recusando por `NODE_ENV`), `app` saudável respondendo `/api/auth/estado` do Postgres do compose, `worker` de pé, `backup.sh` escrevendo e conferindo um dump, `restaurar.sh` devolvendo o banco ao estado dele e a CLI de reset rodando pela imagem do worker. O único serviço não exercitado é o `cloudflared`, que precisa de um token real.
+As duas imagens foram construídas e a pilha foi exercitada local­mente — `migrate` aplicando as 9 migrations e os seeds de produção (com o de desenvolvimento se recusando por `NODE_ENV`), `app` saudável respondendo `/api/auth/estado` do Postgres do compose, `worker` de pé, `backup.sh` escrevendo e conferindo um dump, `restaurar.sh` devolvendo o banco ao estado dele e a CLI de reset rodando pela imagem do worker.
+
+**O túnel saiu da pilha.** A primeira escrita subia um `cloudflared` com um `TUNNEL_TOKEN` no `.env`, e o homelab já tem um, com o token da conta e todas as rotas num lugar só — um segundo seria uma segunda credencial para administrar e um segundo lugar onde olhar quando o domínio não responde. O que ficou é a rede `controle-habito-borda`, `external: true` nas duas pilhas, com o `app` como único serviço dela. Três coisas que a troca fixou:
+
+- **Rede, e não `ports: 127.0.0.1:3000:3000`.** A porta no loopback funcionaria, e daria um segundo caminho até o app — sem `CF-Connecting-IP` — para qualquer processo do host. Pela rede não há caminho alternativo nenhum, e a suposição de `ipDoPedido()` continua verdadeira.
+- **Duas redes.** `controle-habito-interna` tem os quatro serviços e é onde o Postgres existe; a `borda` tem só o `app`. Uma rede só daria ao cloudflared acesso ao banco junto, e ele precisa alcançar uma porta HTTP.
+- **A rede é externa de propósito.** Gerenciada por este compose, um `docker compose down` daqui levaria embora a rede que o túnel usa, e a pilha do cloudflared passaria a não subir por uma dependência não escrita do lado dela. O custo é um `docker network create` antes da primeira subida, e o compose diz exatamente isso quando falta.
+
+Do lado do cloudflared a rede tem de ser **declarada no compose dele**, não ligada com `docker network connect`: o connect é um vínculo perdido no próximo recreate, e o 502 chega dias depois do que o causou.
+
+A rede foi exercitada sem o cloudflared, com um contêiner de fora da pilha: `app:3000` e `habito_app:3000` respondem `/api/auth/estado` de dentro da `borda`, `postgres` nem resolve por DNS a partir dela, e um `docker compose down -v` leva a `interna` e deixa a `borda` de pé. O que falta é o túnel de verdade.
 
 Quatro coisas que a escrita encontrou:
 
@@ -481,7 +491,7 @@ E uma decisão que vale registrar: **nenhuma porta publicada no host**. O rate l
 ### 5.2 Execução (no servidor)
 
 - [ ] domínio definido e `rp_id` gravado — **imutável depois**, mudar invalida a biometria
-- [ ] túnel criado no Cloudflare e o Public Hostname apontando para `app:3000`
+- [ ] rede `controle-habito-borda` criada, o cloudflared do homelab declarando-a no compose dele, e um Public Hostname novo apontando para `app:3000`
 - [ ] par VAPID gerado e registrado em `config_app`
 - [ ] primeiro acesso, cadastro da biometria e a senha recusada em seguida
 - [ ] PWA instalada no celular — último item pendente da etapa 2

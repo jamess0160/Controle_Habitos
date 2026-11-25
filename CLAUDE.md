@@ -29,7 +29,7 @@ No servidor nada disso é npm — o host não tem Node. É `docker compose`, e o
 equivalentes estão em [Docs/Deploy.md](Docs/Deploy.md):
 
 ```bash
-docker compose up -d --build                                   # os cinco serviços
+docker compose up -d --build                                   # os quatro serviços
 docker compose run --rm worker tsx cli/reset-biometria.ts       # a CLI de reset
 docker compose run --rm worker tsx worker/tique-manual.ts "2026-11-26 04:01"
 ./infra/backup.sh                                              # no host, pela crontab
@@ -117,6 +117,12 @@ Cinco armadilhas de infra, todas verificadas construindo as imagens e subindo a 
 - **No `.dockerignore` o `*` não cruza `/`.** `*.test.ts` casa só a raiz: os testes entravam na imagem e o `apoio-de-teste.ts` deles não, e o build morria em oito `TS2307`. Precisa ser `**/*.test.ts`. É uma classe de erro que só o build dentro do contêiner mostra — na máquina de desenvolvimento os dois arquivos existem e `npm run build` passa.
 
 E a regra que o compose documenta onde o `ports:` não está: **nenhuma porta é publicada no host.** O rate limiting conta tentativas por `CF-Connecting-IP`, que só o Cloudflare escreve; um caminho sem esse header faria `ipDoPedido()` devolver `127.0.0.1` para todo mundo, e o bloqueio por IP viraria bloqueio global.
+
+**O túnel não é um serviço da pilha.** O homelab já roda um cloudflared com o token da conta e todas as rotas num lugar só, então o compose tem quatro serviços e oferece uma rede para ele entrar: `controle-habito-borda`, `external: true` nos dois lados, com o `app` como único serviço dela (a `controle-habito-interna` tem os quatro e é onde o Postgres existe — uma rede só daria ao túnel acesso ao banco junto). O Public Hostname aponta para `http://app:3000`, que é o alias de DNS que o compose registra. Três consequências:
+
+- **Rede em vez de `ports: 127.0.0.1:3000:3000`**, que funcionaria e daria um segundo caminho até o app sem `CF-Connecting-IP` para qualquer processo do host.
+- **A rede é externa de propósito**: gerenciada por este compose, um `docker compose down` daqui levaria embora a rede do túnel. O custo é um `docker network create controle-habito-borda` antes da primeira subida.
+- **Do lado do cloudflared a rede tem de ser declarada no compose dele**, não ligada com `docker network connect` — o connect se perde no próximo recreate, e o 502 aparece dias depois do que o causou.
 
 ### A arquitetura que a etapa 3 fixou
 

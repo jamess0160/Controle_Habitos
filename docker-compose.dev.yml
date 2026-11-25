@@ -1,5 +1,5 @@
-# Postgres de desenvolvimento. O compose de produção (app + worker + cloudflared)
-# vem na etapa 5 do roadmap.
+# Postgres de desenvolvimento. O de produção é o docker-compose.yml, com os
+# quatro serviços e sem porta publicada.
 services:
   postgres:
     image: postgres:16-alpine

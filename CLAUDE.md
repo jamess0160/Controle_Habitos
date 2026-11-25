@@ -9,7 +9,7 @@ npm run dev     # dev server (Turbopack) on http://localhost:3000
 npm run build   # production build
 npm run start   # serve the production build
 npm run lint    # eslint (flat config; takes no args by default)
-npm test        # jest (579 casos; exige o db:up rodando)
+npm test        # jest (586 casos; exige o db:up rodando)
 
 npm run db:up        # sobe o Postgres de desenvolvimento (docker-compose.dev.yml)
 npm run db:migrate   # aplica as migrations pendentes
@@ -18,6 +18,7 @@ npm run db:reset     # rollback total + migrate + seed
 npm run db:status    # o que já rodou e o que falta
 
 npm run worker       # o processo do tique de 1 minuto (etapa 3.5)
+npm run worker:tique # um tique à mão, com instante simulado (--seco só resolve o instante)
 npm run push:chaves  # gera um par VAPID e imprime para colar no .env
 
 npm run cli:reset-biometria  # apaga a passkey, gera senha provisória, revoga sessões
@@ -118,7 +119,7 @@ Não estavam no mapa de regras, e estão em `worker/notificacoes.ts`:
 
 ### Testes
 
-`npm test` roda 579 casos em 28 arquivos (Jest 30 via `next/jest`). Exige o `db:up` rodando e nada mais — cada worker cria e migra o próprio database.
+`npm test` roda 586 casos em 28 arquivos (Jest 30 via `next/jest`). Exige o `db:up` rodando e nada mais — cada worker cria e migra o próprio database.
 
 Quatro coisas que valem saber antes de escrever um teste aqui:
 

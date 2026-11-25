@@ -426,7 +426,7 @@ O log é o `stdout`: num contêiner do compose é o que `docker logs` guarda com
 
 ## Etapa 4 — Testes manuais
 
-Executados por você. Entrego um roteiro em `Docs/Roteiro de testes.md` antes desta etapa começar, cobrindo:
+Executados por você. O roteiro está entregue em **[Roteiro de testes.md](Roteiro%20de%20testes.md)**, com passos, resultado esperado e a armadilha de cada seção — o comportamento que parece defeito e é a regra. Ele cobre:
 
 - [x] primeiro acesso, cadastro de biometria, reentrada por biometria, senha recusada depois de desativada
 - [x] reset pela interface e reset pela CLI, com reentrada após cada um
@@ -439,7 +439,15 @@ Executados por você. Entrego um roteiro em `Docs/Roteiro de testes.md` antes de
 - [ ] notificações reais no celular, com a PWA instalada e com ela fechada
 - [x] reordenação persistindo
 
-Para não esperar dias por um fechamento de período, o worker ganha um modo de execução manual que aceita um instante simulado — necessário para testar à mão o que depende de calendário.
+Para não esperar dias por um fechamento de período, o worker ganhou um modo de execução manual que aceita um instante simulado (`npm run worker:tique`, em `worker/tique-manual.ts`). Ele roda o **mesmo** `tique()` do processo de um minuto — um caminho separado de fechamento manual não provaria nada sobre o que roda de madrugada —, e o instante sem fuso é lido na parede do app e não na do processo, senão `04:01` num contêiner com `TZ=UTC` seria `01:01` em São Paulo e a virada simplesmente não aconteceria. `--seco` resolve o instante e para antes de tocar no banco.
+
+### 4.1 — correções dos testes manuais
+
+Três pontos vistos em uso, corrigidos antes de seguir:
+
+- **lembrete virou opt-in explícito** — botão *Ativar* / *Sem lembrete*, com o campo de horário aparecendo só depois. "Deixe em branco para não receber" fazia o campo perguntar *quando* quando a pergunta era *se*;
+- **o formulário é zerado depois de criar** — `router.replace` troca a rota, não o estado do componente, e o cadastro seguinte abria com o hábito anterior dentro;
+- **a meta de duração passou a segundos inteiros** (migration `0009`), com o campo virando um relógio `h : min : s`. A escala de minutos inteiros não expressava "30 s", e minuto fracionário quebraria a avaliação: a meta é soma de registros, e três sessões de 20 s dariam `0.99999…` contra 1 min.
 
 ---
 

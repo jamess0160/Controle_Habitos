@@ -16,6 +16,7 @@
     "db:seed": "tsx db/cli.ts seed",
     "db:reset": "tsx db/cli.ts reset",
     "worker": "tsx worker/index.ts",
+    "worker:tique": "tsx worker/tique-manual.ts",
     "push:chaves": "tsx cli/vapid.ts",
     "cli:reset-biometria": "tsx cli/reset-biometria.ts",
     "cli:reset-senha": "tsx cli/reset-senha.ts",

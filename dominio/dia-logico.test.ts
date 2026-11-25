@@ -1,4 +1,4 @@
-import { RELOGIO_PADRAO, dataLogicaDe, saudacaoDe } from "./dia-logico";
+import { RELOGIO_PADRAO, dataLogicaDe, instanteDeParede, saudacaoDe } from "./dia-logico";
 
 /**
  * São Paulo é UTC-3 e não tem mais horário de verão, então a hora de parede
@@ -60,5 +60,86 @@ describe("saudacaoDe", () => {
     expect(saudacaoDe(utc("2026-11-09T15:00:00Z"))).toBe("boa_tarde"); // 12:00
     expect(saudacaoDe(utc("2026-11-09T20:00:00Z"))).toBe("boa_tarde"); // 17:00
     expect(saudacaoDe(utc("2026-11-09T21:00:00Z"))).toBe("boa_noite"); // 18:00
+  });
+});
+
+/**
+ * A volta: o que o modo manual do worker usa para transformar `2026-11-19 04:01`
+ * no instante em que o app realmente vira o dia.
+ *
+ * O teste que importa é o do **fuso do processo**: o contêiner do homelab roda
+ * com `TZ=UTC`, e se o argumento fosse lido ali as `04:01` pedidas seriam
+ * `01:01` em São Paulo — nenhuma virada aconteceria, e o teste manual acusaria o
+ * worker de um defeito que é do instante.
+ */
+describe("instanteDeParede", () => {
+  const parede = { ano: 2026, mes: 11, dia: 19, hora: 4, minuto: 1 };
+
+  it("é a inversa de dataLogicaDe: a parede pedida é a parede obtida", () => {
+    const instante = instanteDeParede(parede, "America/Sao_Paulo");
+
+    expect(instante.toISOString()).toBe("2026-11-19T07:01:00.000Z");
+    expect(dataLogicaDe(instante)).toBe("2026-11-19");
+  });
+
+  it("o mesmo pedido em outro fuso dá outro instante", () => {
+    expect(instanteDeParede(parede, "UTC").toISOString()).toBe("2026-11-19T04:01:00.000Z");
+    expect(instanteDeParede(parede, "Asia/Tokyo").toISOString()).toBe(
+      "2026-11-18T19:01:00.000Z",
+    );
+  });
+
+  it("acerta o minuto exato antes e depois da virada", () => {
+    const antes = instanteDeParede({ ...parede, hora: 3, minuto: 59 });
+    const depois = instanteDeParede({ ...parede, hora: 4, minuto: 0 });
+
+    expect(dataLogicaDe(antes)).toBe("2026-11-18");
+    expect(dataLogicaDe(depois)).toBe("2026-11-19");
+  });
+
+  it("leva o segundo quando ele é dado, e zera quando não é", () => {
+    expect(instanteDeParede({ ...parede, segundo: 30 }).toISOString()).toBe(
+      "2026-11-19T07:01:30.000Z",
+    );
+    expect(instanteDeParede(parede).toISOString()).toBe("2026-11-19T07:01:00.000Z");
+  });
+
+  /*
+   * O Brasil não tem mais horário de verão, mas o fuso vem de `config_app` e
+   * nada impede configurar um que tenha. Nova York adianta em 2026-03-08 às
+   * 02:00 e atrasa em 2026-11-01 às 02:00, então aquele dia tem uma hora que não
+   * existe e o outro uma que acontece duas vezes. O que se exige das duas é
+   * instante real e determinado — nunca `Invalid Date`, nunca um dia de erro.
+   */
+  it("hora que o horário de verão pula resolve para a hora antes do salto", () => {
+    const pulada = instanteDeParede(
+      { ano: 2026, mes: 3, dia: 8, hora: 2, minuto: 30 },
+      "America/New_York",
+    );
+
+    expect(Number.isNaN(pulada.getTime())).toBe(false);
+    // 01:30 EST: as 02:30 pedidas não existem naquele dia.
+    expect(pulada.toISOString()).toBe("2026-03-08T06:30:00.000Z");
+  });
+
+  it("hora repetida pelo atraso cai na primeira passagem", () => {
+    const repetida = instanteDeParede(
+      { ano: 2026, mes: 11, dia: 1, hora: 1, minuto: 30 },
+      "America/New_York",
+    );
+
+    // 01:30 EDT, e não as 01:30 EST que vêm uma hora depois.
+    expect(repetida.toISOString()).toBe("2026-11-01T05:30:00.000Z");
+  });
+
+  it("os instantes vizinhos de uma transição continuam exatos", () => {
+    expect(
+      instanteDeParede({ ano: 2026, mes: 3, dia: 7, hora: 23, minuto: 0 }, "America/New_York")
+        .toISOString(),
+    ).toBe("2026-03-08T04:00:00.000Z");
+    expect(
+      instanteDeParede({ ano: 2026, mes: 3, dia: 8, hora: 5, minuto: 0 }, "America/New_York")
+        .toISOString(),
+    ).toBe("2026-03-08T09:00:00.000Z");
   });
 });

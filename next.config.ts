@@ -1,7 +1,24 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  /*
+   * Build empacotado para contêiner.
+   *
+   * `standalone` escreve `.next/standalone/` com o servidor mínimo (`server.js`)
+   * e só os arquivos de `node_modules` que o rastreamento provou necessários —
+   * é o que deixa a imagem do app sem `npm install` e sem as dependências de
+   * desenvolvimento. `public/` e `.next/static` **não** vão junto por decisão do
+   * Next (ele assume CDN); o [Dockerfile](Dockerfile) os copia à mão, senão o app
+   * sobe sem CSS e sem o service worker — e sem service worker a PWA não instala.
+   *
+   * O rastreamento não alcança o `require` dinâmico do Knex (a mesma causa do
+   * `serverExternalPackages` abaixo), então o dialeto `pg` entra por
+   * `outputFileTracingIncludes`.
+   */
+  output: "standalone",
+  outputFileTracingIncludes: {
+    "/api/**/*": ["./node_modules/knex/**/*", "./node_modules/pg/**/*"],
+  },
   cacheComponents: true,
   partialPrefetching: true,
   /*

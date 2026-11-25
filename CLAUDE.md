@@ -25,6 +25,17 @@ npm run cli:reset-biometria  # apaga a passkey, gera senha provisória, revoga s
 npm run cli:reset-senha      # só uma senha provisória nova
 ```
 
+No servidor nada disso é npm — o host não tem Node. É `docker compose`, e os
+equivalentes estão em [Docs/Deploy.md](Docs/Deploy.md):
+
+```bash
+docker compose up -d --build                                   # os cinco serviços
+docker compose run --rm worker tsx cli/reset-biometria.ts       # a CLI de reset
+docker compose run --rm worker tsx worker/tique-manual.ts "2026-11-26 04:01"
+./infra/backup.sh                                              # no host, pela crontab
+./infra/restaurar.sh habito-20261126-0415.dump
+```
+
 `npm test` exige o Postgres de desenvolvimento rodando e nada mais: cada worker do Jest cria e migra o próprio database (`controle_habito_test_<n>`). O SWC do `next/jest` transforma TypeScript **sem checar tipos**, então `npx tsc --noEmit` roda ao lado — e `npm run build` também, porque `cacheComponents` recusa ler `params` fora de `<Suspense>` e só o build diz isso.
 
 As duas CLIs de reset são destrutivas e exigem a palavra escrita (`RESETAR`, `GERAR`/`REATIVAR`). Sem terminal interativo elas recusam; `--sim` dispensa a confirmação e fica registrado no log.
@@ -65,7 +76,7 @@ The domain rules are non-trivial and were decided deliberately; [Docs/mapas/](Do
 - **[Mapa de telas.md](Docs/mapas/Mapa%20de%20telas.md)** — screens, flows, per-type interactions, and the wave 1 / wave 2 split.
 - **[Mapa de autenticação.md](Docs/mapas/Mapa%20de%20autentica%C3%A7%C3%A3o.md)** — WebAuthn flows, the reset CLI, rate limiting, and the accepted limits.
 
-Each map ends with a "Pendências" section listing what is still undecided — check it before inventing an answer to one of those questions. **[Docs/Roadmap onda 1.md](Docs/Roadmap%20onda%201.md)** has the execution order, per-stage exit criteria, the API route inventory, and the known risks.
+Each map ends with a "Pendências" section listing what is still undecided — check it before inventing an answer to one of those questions. **[Docs/Roadmap onda 1.md](Docs/Roadmap%20onda%201.md)** has the execution order, per-stage exit criteria, the API route inventory, and the known risks. **[Docs/Deploy.md](Docs/Deploy.md)** is the server runbook — what comes up, the variables, first access, the reset CLIs inside the container, the verified backup and the restore. Any change to the Dockerfile, the compose file or `infra/` has to show up there.
 
 Four traps worth stating up front:
 
@@ -79,12 +90,33 @@ Schema and queries both go through **Knex** (migrations + seeds in `db/`), with 
 
 ## Current state
 
-**Etapas 1, 2 e 3 estão completas.** Nada no app roda sobre fixture: toda rota de domínio fala com o Postgres. O que falta da onda 1 é a etapa 4 (validação no celular) e a 5 (deploy).
+**Etapas 1 a 4 estão completas, e a 5 está escrita mas não executada.** Nada no app roda sobre fixture exceto `GET /api/exportar` (ver abaixo): toda rota de domínio fala com o Postgres.
 
-Dois itens pendentes, os dois esperando HTTPS num domínio estável — o túnel da etapa 5, ou um temporário:
+O que a etapa 5 deixou pronto no repositório: [Dockerfile](Dockerfile) com os dois alvos, [docker-compose.yml](docker-compose.yml) de produção, `infra/` (backup verificado e restauração) e **[Docs/Deploy.md](Docs/Deploy.md)**, que é o runbook — leia-o antes de mexer em qualquer coisa de infra.
+
+O que falta é execução no servidor, e três itens dependem dela:
 
 - validar a PWA **instalada** no celular (último item da etapa 2);
-- provar o push chegando com o app fechado (etapa 4). O caminho inteiro está de pé e testado; o que não se prova em `localhost` é a entrega real.
+- provar o push chegando com o app fechado (etapa 4). O caminho inteiro está de pé e testado; o que não se prova em `localhost` é a entrega real;
+- a **restauração testada** que fecha a etapa 5 — o roteiro está em [Docs/Deploy.md](Docs/Deploy.md).
+
+E uma dívida que o deploy tornou visível: **`GET /api/exportar` ainda devolve fixture.** O botão de exportar em Ajustes foi escrito quando não havia backup e se descrevia como "a única cópia fora do Postgres"; agora a cópia de verdade é o `pg_dump` de `infra/backup.sh`, mas a tela continua prometendo um arquivo que não é o histórico real.
+
+### O que a etapa 5 fixou
+
+**Duas imagens de um Dockerfile só**, porque as necessidades são opostas. `--target app` é o `output: "standalone"` do Next: servidor mínimo, sem npm dentro. `--target worker` é TypeScript cru sob `tsx`, e atende as três coisas que não passam pelo Next — o tique de um minuto, as migrations da subida e as CLIs de reset.
+
+É por isso que **`tsx` está em `dependencies`**, não em devDependencies: `next build` compila só o grafo do app, e `tsc` não reescreveria os aliases `@/*` na saída — um `require("@/db/knex")` emitido não resolve. Mover o `tsx` de volta quebraria a imagem do worker, não um script de conveniência.
+
+Cinco armadilhas de infra, todas verificadas construindo as imagens e subindo a pilha:
+
+- **`next build` exige `DATABASE_URL`.** Ele avalia o grafo de cada rota para coletar a configuração dela, e nesse grafo está o `knexfile.ts`, que lança quando a variável falta: o build morre em "Failed to collect page data for /api/auth/logout". O Dockerfile passa um valor descartável na etapa de build. Nada é inlinado — o projeto não tem nenhuma `NEXT_PUBLIC_*` —, então a mesma imagem sobe em qualquer máquina.
+- **O `standalone` copia o `.env` da raiz** para dentro de `.next/standalone/`. Com o arquivo no contexto do build, o segredo acabaria embutido na imagem; `.env` é o primeiro item do `.dockerignore` por isso.
+- **`.next/static` e `public/` ficam fora do standalone** por decisão do Next (ele assume CDN). O Dockerfile os copia à mão: sem o primeiro o app sobe sem CSS, sem o segundo não há `/sw.js` — e sem service worker a PWA não instala, o que mata o push no iOS.
+- **Migrations num serviço de passagem, não num entrypoint.** App e worker sobem juntos, e os dois rodando `migrate latest` ao mesmo tempo disputariam a trava do Knex num banco que ainda não tem a tabela de trava. O serviço `migrate` roda antes dos dois, com `service_completed_successfully`.
+- **No `.dockerignore` o `*` não cruza `/`.** `*.test.ts` casa só a raiz: os testes entravam na imagem e o `apoio-de-teste.ts` deles não, e o build morria em oito `TS2307`. Precisa ser `**/*.test.ts`. É uma classe de erro que só o build dentro do contêiner mostra — na máquina de desenvolvimento os dois arquivos existem e `npm run build` passa.
+
+E a regra que o compose documenta onde o `ports:` não está: **nenhuma porta é publicada no host.** O rate limiting conta tentativas por `CF-Connecting-IP`, que só o Cloudflare escreve; um caminho sem esse header faria `ipDoPedido()` devolver `127.0.0.1` para todo mundo, e o bloqueio por IP viraria bloqueio global.
 
 ### A arquitetura que a etapa 3 fixou
 

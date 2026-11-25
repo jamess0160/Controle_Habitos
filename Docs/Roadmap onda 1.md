@@ -453,16 +453,46 @@ Três pontos vistos em uso, corrigidos antes de seguir:
 
 ## Etapa 5 — Deploy
 
-- [ ] `output: 'standalone'` no [next.config.ts](../next.config.ts) (ainda não está lá) e Dockerfile multi-stage
-- [ ] `docker-compose.yml` de produção: `postgres`, `app`, `worker`, `cloudflared`
-- [ ] entrypoint aplicando `knex migrate:latest` na subida
-- [ ] geração das chaves VAPID e registro em `config_app`
+Dividida em duas: o que se escreve no repositório, e o que só existe com o servidor na frente. A primeira metade está feita; a segunda é a execução, e é ela que fecha a onda 1.
+
+### 5.1 Preparação (no repositório)
+
+- [x] `output: 'standalone'` no [next.config.ts](../next.config.ts) e [Dockerfile](../Dockerfile) multi-stage
+- [x] `docker-compose.yml` de produção: `postgres`, `migrate`, `app`, `worker`, `cloudflared`
+- [x] migrations aplicadas na subida, antes de app e worker existirem
+- [x] `infra/backup.sh` com `pg_dump` verificado e retenção, e `infra/restaurar.sh`
+- [x] `.env.producao.example` separado do de desenvolvimento
+- [x] **[Docs/Deploy.md](Deploy.md)**: subida do zero, variáveis, primeiro acesso, CLIs de reset no contêiner, backup e restauração
+- [x] `.gitattributes` travando os scripts em LF — o repositório é editado no Windows e roda em contêiner Linux
+
+**Duas imagens de um Dockerfile só.** `--target app` é o standalone do Next; `--target worker` é TypeScript cru sob `tsx`, e atende o tique de um minuto, as migrations e as CLIs de reset. São duas porque as necessidades são opostas: o app quer só o que o rastreamento provou necessário, o worker precisa de `node_modules` de verdade. É também por isso que **`tsx` saiu de `devDependencies` para `dependencies`** — `next build` compila o grafo do app, e `tsc` não reescreveria os aliases `@/*` na saída, então um `require("@/db/knex")` emitido não resolveria. Compilar exigiria um segundo bundler para três entradas que não são o app.
+
+As duas imagens foram construídas e a pilha foi exercitada local­mente — `migrate` aplicando as 9 migrations e os seeds de produção (com o de desenvolvimento se recusando por `NODE_ENV`), `app` saudável respondendo `/api/auth/estado` do Postgres do compose, `worker` de pé, `backup.sh` escrevendo e conferindo um dump, `restaurar.sh` devolvendo o banco ao estado dele e a CLI de reset rodando pela imagem do worker. O único serviço não exercitado é o `cloudflared`, que precisa de um token real.
+
+Quatro coisas que a escrita encontrou:
+
+- **O build precisa de `DATABASE_URL`.** `next build` avalia o grafo de cada rota para coletar a configuração dela, e nesse grafo está o `knexfile.ts`, que lança quando a variável falta — o build morre em "Failed to collect page data for /api/auth/logout". O Dockerfile passa um valor descartável na etapa de build. Nada de ambiente é inlinado (o projeto não tem nenhuma `NEXT_PUBLIC_*`), então a mesma imagem sobe em qualquer máquina.
+- **O `standalone` copia o `.env` que encontrar na raiz** para dentro de `.next/standalone/`. Com o arquivo no contexto do build, o segredo acabaria embutido na imagem — daí o `.env` ser o primeiro item do `.dockerignore`.
+- **Migrations num serviço de passagem, não num entrypoint.** O plano dizia entrypoint; app e worker sobem juntos, e os dois rodando `migrate latest` ao mesmo tempo disputariam a trava do Knex num banco que ainda não tem a tabela de trava — a corrida acontece exatamente na primeira subida. Com `service_completed_successfully` nos dois, ninguém sobe sobre schema velho.
+- **No `.dockerignore` o `*` não cruza `/`.** `*.test.ts` casava só a raiz, então os testes entravam na imagem enquanto o `apoio-de-teste.ts` que eles importam ficava de fora (está listado por caminho exato), e o `next build` morria em oito `TS2307`. Só o build dentro do contêiner mostra isso — `npm run build` na máquina de desenvolvimento passa, porque lá os dois arquivos existem. Precisa ser `**/*.test.ts`.
+
+E uma decisão que vale registrar: **nenhuma porta publicada no host**. O rate limiting conta tentativas por `CF-Connecting-IP`, header que só o Cloudflare escreve; um caminho sem ele faria `ipDoPedido()` devolver `127.0.0.1` para todo mundo, e o bloqueio por IP viraria bloqueio global. O compose documenta isso onde o `ports:` não está.
+
+### 5.2 Execução (no servidor)
+
 - [ ] domínio definido e `rp_id` gravado — **imutável depois**, mudar invalida a biometria
-- [ ] `pg_dump` agendado no host, com retenção e **uma restauração testada** (backup não verificado não é backup)
-- [ ] `Docs/Deploy.md`: subida do zero, variáveis, primeiro acesso, como rodar a CLI de reset, como restaurar backup
+- [ ] túnel criado no Cloudflare e o Public Hostname apontando para `app:3000`
+- [ ] par VAPID gerado e registrado em `config_app`
+- [ ] primeiro acesso, cadastro da biometria e a senha recusada em seguida
+- [ ] PWA instalada no celular — último item pendente da etapa 2
+- [ ] push chegando **com o app fechado** — último item pendente da etapa 4
+- [ ] `pg_dump` agendado na crontab, com **uma restauração testada** (backup não verificado não é backup)
 
 **Fechada quando** o app sobe do zero numa máquina limpa seguindo só a documentação, acessível pelo domínio, com notificação chegando no celular.
 
+### Fora da etapa, mas visível nela
+
+`GET /api/exportar` ainda devolve fixture: o botão **Ajustes › Dados › exportar** foi escrito quando o `pg_dump` não existia e se descrevia como "a única cópia dos dados fora do Postgres". Agora que o backup verificado é o `infra/backup.sh`, a rota não é mais a única cópia — mas continua prometendo na tela um arquivo que não é o histórico real. Ligá-la ao banco é trabalho de domínio, não de deploy.
 ---
 
 ## Riscos conhecidos
@@ -474,4 +504,4 @@ Três pontos vistos em uso, corrigidos antes de seguir:
 | `rp_id` imutável | trocar de domínio invalida a biometria | domínio decidido na etapa 5 e gravado; CLI como saída |
 | Pool do Knex no dev | hot reload esgotando conexões | singleton em `globalThis` na etapa 1.1 |
 | API do Zod mudou na v4 | tutorial de v3 não se aplica | versão fixada na etapa 1.1, contratos escritos contra a v4 |
-| Backup de homelab | única cópia do histórico | restauração testada como critério de fechamento da etapa 5 |
+| Backup de homelab | única cópia do histórico | `infra/backup.sh` confere o dump que escreve; restauração testada como critério de fechamento da etapa 5 |

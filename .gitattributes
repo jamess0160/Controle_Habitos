@@ -1,0 +1,13 @@
+# Fim de linha.
+#
+# O repositório é editado no Windows e roda em contêiner Linux. Um script de
+# shell com CRLF falha no contêiner de uma forma particularmente ruim de
+# diagnosticar — `/bin/sh^M: bad interpreter` —, então os arquivos que o Linux
+# executa ou lê linha a linha ficam travados em LF, independentemente da
+# configuração de core.autocrlf de quem clonar.
+*.sh text eol=lf
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+*.yml text eol=lf
+.env.example text eol=lf
+.env.producao.example text eol=lf

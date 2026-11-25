@@ -1,0 +1,164 @@
+# Compose de produção: cinco serviços no homelab, nenhuma porta publicada.
+#
+# ┌─────────────┐   túnel saindo    ┌────────────┐
+# │ cloudflared │ ────────────────▶ │ Cloudflare │ ◀── celular, pelo domínio
+# └──────┬──────┘                   └────────────┘
+#        │ http://app:3000 (rede interna do compose)
+# ┌──────▼──────┐      ┌────────┐      ┌──────────┐
+# │     app     │      │ worker │      │ migrate  │ (roda uma vez e sai)
+# └──────┬──────┘      └───┬────┘      └────┬─────┘
+#        └────────────┬────┴────────────────┘
+#                ┌────▼─────┐
+#                │ postgres │  volume nomeado, sem porta no host
+#                └──────────┘
+#
+# **Nenhum `ports:` aqui, e isso é segurança, não economia.** O rate limiting
+# conta tentativas por `CF-Connecting-IP`, header que só o Cloudflare escreve
+# (ver servidor/pedido.ts). Publicar a porta do app daria um caminho sem esse
+# header, onde `ipDoPedido()` cai em 127.0.0.1 para todo mundo: o bloqueio por IP
+# viraria um bloqueio global, e cinco erros de digitação trancariam o app
+# inclusive para quem sabe a senha. O único caminho de entrada é o túnel.
+#
+# Variáveis: copie `.env.producao.example` para `.env` ao lado deste arquivo.
+
+name: controle-habito
+
+# O ambiente comum aos três serviços que falam com o banco.
+#
+# `DATABASE_URL` é montada aqui e NÃO vem do `.env`: a senha teria de ser escrita
+# duas vezes (na variável do Postgres e dentro da URL), e duas cópias de uma
+# senha é uma cópia que vai divergir. Por isso `POSTGRES_PASSWORD` tem de usar só
+# caracteres seguros em URL — `openssl rand -hex 32` resolve.
+x-ambiente-do-app: &ambiente-do-app
+  NODE_ENV: production
+  # O código não depende disto: `horaDeParede` usa o fuso de `config_app` pelo
+  # `Intl`, justamente para não herdar o do processo. O que o TZ muda é o
+  # carimbo de hora do `docker logs`.
+  TZ: ${TZ:-America/Sao_Paulo}
+  DATABASE_URL: postgres://${POSTGRES_USER:-habito}:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/${POSTGRES_DB:-controle_habito}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: habito_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-controle_habito}
+      POSTGRES_USER: ${POSTGRES_USER:-habito}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      TZ: ${TZ:-America/Sao_Paulo}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      # O diretório de backup, montado para dentro do contêiner.
+      #
+      # `pg_dump` e `pg_restore` moram aqui, não no host — o host de um homelab
+      # não precisa de um cliente Postgres instalado só para isso, e versão de
+      # cliente diferente da do servidor é uma classe de erro inteira que esta
+      # montagem elimina. Os dois trabalham com arquivo, e não com stdin: para o
+      # formato custom, `pg_restore` lendo de um cano não consegue reordenar nem
+      # restaurar seletivamente.
+      #
+      # Os arquivos ficam do usuário `postgres` do contêiner (uid 999). Apagar um
+      # deles no host depende da permissão do DIRETÓRIO, não do arquivo, então a
+      # retenção de infra/backup.sh funciona sem root.
+      - ${HABITO_BACKUP_DIR:-/var/backups/controle-habito}:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-habito} -d ${POSTGRES_DB:-controle_habito}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # Migrations e seeds, uma vez por subida, antes de app e worker existirem.
+  #
+  # Serviço de passagem e não entrypoint das outras duas imagens: app e worker
+  # sobem juntos, e os dois rodando `migrate latest` ao mesmo tempo disputariam a
+  # trava do Knex num banco que ainda não tem a tabela de trava — a corrida
+  # acontece exatamente na primeira subida, que é a que menos pode falhar. Com
+  # `service_completed_successfully` nos dois, ninguém sobe sobre schema velho.
+  migrate:
+    build:
+      context: .
+      target: worker
+    image: controle-habito-worker:local
+    container_name: habito_migrate
+    restart: "no"
+    env_file: .env
+    environment: *ambiente-do-app
+    command: ["sh", "infra/migrar.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    build:
+      context: .
+      target: app
+    image: controle-habito-app:local
+    container_name: habito_app
+    restart: unless-stopped
+    env_file: .env
+    environment: *ambiente-do-app
+    # `expose` e não `ports`: visível para o cloudflared, invisível para a rede
+    # do host. Ver a nota no topo.
+    expose:
+      - "3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # `/api/auth/estado` é a rota pública que consulta o banco — serve de
+      # liveness e de readiness de uma vez, e não precisa de sessão. Qualquer
+      # outra responderia 401 e o contêiner pareceria doente.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/auth/estado || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  worker:
+    build:
+      context: .
+      target: worker
+    image: controle-habito-worker:local
+    container_name: habito_worker
+    restart: unless-stopped
+    env_file: .env
+    environment: *ambiente-do-app
+    # O CMD da imagem: tsx worker/index.ts
+    #
+    # O SIGTERM não interrompe o tique em curso, ele marca o laço para parar
+    # depois dele (worker/index.ts). Matar no meio de uma materialização é o que
+    # a transação protege, mas o processo precisa do tempo de terminá-la — os 10 s
+    # de carência padrão do Docker não bastam para a virada das 04:00 de um banco
+    # com histórico.
+    stop_grace_period: 90s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  cloudflared:
+    # `latest` de propósito, e é o único serviço aqui onde isso se defende: o
+    # cloudflared é um cliente que conversa com a borda do Cloudflare, e uma
+    # versão parada acaba recusada. `--no-autoupdate` porque quem atualiza é o
+    # `docker compose pull`, não o binário se trocando por dentro de um contêiner
+    # imutável.
+    image: cloudflare/cloudflared:latest
+    container_name: habito_tunel
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?defina TUNNEL_TOKEN no .env — o token do túnel criado no painel do Cloudflare}
+      TZ: ${TZ:-America/Sao_Paulo}
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  # Nomeado, e o nome completo é `controle-habito_postgres` (o `name:` do topo
+  # vira prefixo). É o que o backup e a restauração em infra/ pressupõem.
+  postgres:

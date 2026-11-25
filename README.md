@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Controle de Hábitos
 
-## Getting Started
+Acompanhamento diário de hábitos, sequências e congelamentos. App pessoal de um
+usuário só, auto-hospedado: Next.js e Postgres em contêineres no homelab,
+alcançáveis por um Cloudflare Tunnel num domínio fixo. Entrada por passkey, um
+aparelho. **Não** vai para a Vercel.
 
-First, run the development server:
+Interface, documentação e vocabulário de domínio em pt-BR.
+
+## Documentação
+
+Os mapas são a fonte de verdade do comportamento — não o código.
+
+| Documento | O que tem |
+|---|---|
+| [Mapa de regras](Docs/mapas/Mapa%20de%20regras.md) | o primeiro a ler: dia lógico das 04:00, cadência, estados de período, sequência, congelamento |
+| [Mapa do banco](Docs/mapas/Mapa%20do%20banco.md) | schema, Knex, a `habito_config` versionada, a `habito_periodo` materializada |
+| [Mapa de telas](Docs/mapas/Mapa%20de%20telas.md) | as sete telas, fluxos e interações por tipo |
+| [Mapa de autenticação](Docs/mapas/Mapa%20de%20autentica%C3%A7%C3%A3o.md) | WebAuthn, CLI de reset, rate limiting |
+| [Roadmap onda 1](Docs/Roadmap%20onda%201.md) | ordem de execução, critério de saída de cada etapa, riscos |
+| [Roteiro de testes](Docs/Roteiro%20de%20testes.md) | os testes manuais, com a armadilha de cada seção |
+| **[Deploy](Docs/Deploy.md)** | **subida do zero no servidor, variáveis, backup e restauração** |
+
+[CLAUDE.md](CLAUDE.md) resume o estado atual e as armadilhas que já morderam.
+
+## Desenvolvimento
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env     # e ajuste
+npm install
+npm run db:up            # Postgres de desenvolvimento, em Docker
+npm run db:migrate
+npm run db:seed          # 6 hábitos cobrindo os 4 tipos, com 30 dias de histórico
+npm run dev              # http://localhost:3000
+npm run worker           # noutro terminal: o tique de 1 minuto
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Testes: `npm test` (exige o `db:up` rodando; cada worker do Jest cria e migra o
+próprio database). O SWC transforma TypeScript **sem checar tipos**, então
+`npx tsc --noEmit` roda ao lado — e `npm run build` também, porque só o build
+reclama de `params` lido fora de `<Suspense>`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+A lista completa de scripts está em [CLAUDE.md](CLAUDE.md).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Produção
 
-## Learn More
+```bash
+cp .env.producao.example .env     # no servidor
+docker compose up -d --build
+```
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Cinco serviços: `postgres`, `migrate` (de passagem), `app`, `worker`,
+`cloudflared`. Nenhuma porta publicada no host — o único caminho de entrada é o
+túnel, e o rate limiting depende disso. O passo a passo, incluindo o túnel, o
+primeiro acesso e o backup verificado, está em **[Docs/Deploy.md](Docs/Deploy.md)**.

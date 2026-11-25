@@ -1,0 +1,44 @@
+# O contexto do build. O que não estiver aqui vai para o daemon do Docker e,
+# pior, pode acabar na imagem.
+
+# `.env` é o item mais importante desta lista. O `output: "standalone"` COPIA o
+# .env que encontrar na raiz para dentro de `.next/standalone/`, então um .env no
+# contexto viraria segredo embutido na imagem. Em produção tudo entra por
+# ambiente, pelo compose.
+.env
+.env.*
+
+node_modules
+.next
+.swc
+coverage
+.git
+.gitattributes
+.gitignore
+
+# Testes: a imagem não os roda, e eles arrastam os helpers de banco de teste.
+#
+# `**/` não é enfeite: no .dockerignore o `*` NÃO cruza `/`, então `*.test.ts`
+# casaria só a raiz. Sem os dois asteriscos, `servidor/push.test.ts` entra na
+# imagem, o `apoio-de-teste.ts` que ele importa fica de fora (está listado por
+# caminho exato logo abaixo), e o `next build` morre em oito TS2307.
+**/*.test.ts
+**/*.test.tsx
+jest.config.mjs
+jest.setup.ts
+jest.setupComponentes.ts
+jest.globalSetup.ts
+db/teste.ts
+db/teste-url.ts
+servidor/apoio-de-teste.ts
+
+# Documentação e ferramental que não participam do build.
+Docs
+README.md
+CLAUDE.md
+AGENTS.md
+tsconfig.tsbuildinfo
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.dev.yml

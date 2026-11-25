@@ -15,10 +15,14 @@ O comportamento do app está nos [mapas](mapas/); aqui está só a operação.
                                   │ Cloudflare │ ◀── celular, pelo domínio
                                   └─────▲──────┘
  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│─ ─ ─ túnel saindo ─ ─ ─ ─ ─ ─ ─ ─ ─
-┌────────────────────────┐              │     cloudflared do homelab: já de pé,
-│ cloudflared (do host)  │ ─────────────┘     NÃO é um serviço desta pilha
+┌────────────────────────┐              │     já de pé no homelab, e NENHUM
+│ cloudflared            │ ─────────────┘     dos dois é serviço desta pilha
 └───────┬────────────────┘
-        │ http://app:3000  (rede `controle-habito-borda`)
+        │ tudo para o nginx
+┌───────▼────────────────┐
+│ nginx do host          │  habitos.conf: server_name → proxy_pass
+└───────┬────────────────┘
+        │ http://127.0.0.1:3000   (loopback do host)
 ┌───────▼─────┐      ┌────────┐      ┌─────────┐
 │     app     │      │ worker │      │ migrate │ (roda uma vez e sai)
 └──────┬──────┘      └───┬────┘      └────┬────┘
@@ -35,29 +39,35 @@ O comportamento do app está nos [mapas](mapas/); aqui está só a operação.
 | `app` | `--target app` | o Next empacotado (`output: "standalone"`), `node server.js` |
 | `worker` | `--target worker` | o tique de 1 minuto: virada das 04:00, notificações, limpeza |
 
-**O túnel não está na lista, e é de propósito.** O homelab já roda um
-cloudflared, com o token da conta e todas as rotas num lugar só; um segundo
-túnel seria uma segunda credencial para administrar e um segundo lugar onde
-olhar quando o domínio não responde. Esta pilha não o sobe — ela oferece uma
-**rede** para ele entrar, e o passo 2 liga as duas pontas.
+**Nem o túnel nem o nginx estão na lista, e é de propósito.** O homelab já roda
+os dois — o cloudflared com o token da conta e todas as rotas num lugar só, e o
+nginx distribuindo por domínio para cada aplicação do servidor. Um segundo de
+qualquer um seria uma segunda credencial para administrar ou um segundo lugar
+onde olhar quando o domínio não responde. O passo 2 liga esta pilha ao nginx que
+já existe.
 
-**Nenhuma porta é publicada no host, e isso é segurança.** O rate limiting conta
-tentativas de login por `CF-Connecting-IP`, header que só o Cloudflare escreve
-(ver [servidor/pedido.ts](../servidor/pedido.ts)). Um caminho sem esse header
-faria `ipDoPedido()` devolver `127.0.0.1` para todo mundo: o bloqueio por IP
-viraria bloqueio global, e cinco erros de digitação trancariam o app inclusive
-para quem sabe a senha. Se um dia precisar alcançar o app na rede local, use um
-túnel SSH, não um `ports:`.
+**A única porta publicada é a do app, e só em `127.0.0.1`.** O rate limiting
+conta tentativas de login por `CF-Connecting-IP`, header que o Cloudflare
+escreve e o nginx repassa intacto (ver
+[servidor/pedido.ts](../servidor/pedido.ts)). Um pedido que chegue por outro
+caminho não tem esse header, e `ipDoPedido()` devolve `127.0.0.1` para todo
+mundo: o bloqueio por IP viraria bloqueio global, e cinco erros de digitação
+trancariam o app inclusive para quem sabe a senha.
 
-É por isso que o cloudflared entra numa rede do Docker em vez de apontar para
-`http://localhost:3000`: um `ports: 127.0.0.1:3000:3000` funcionaria, e daria um
-segundo caminho até o app — sem `CF-Connecting-IP` — para qualquer processo do
-host. Pela rede não há caminho alternativo nenhum.
+O `127.0.0.1:` do `ports:` é o que mantém esse caminho alternativo restrito a
+processos **deste host** — onde o nginx mora, e onde quem já tem acesso também
+tem o volume do Postgres. O que ele impede é a rede local inteira ter uma porta
+de entrada sem túnel. Duas coisas valem saber:
 
-As duas redes são `controle-habito-interna` (os quatro serviços; o Postgres só
-existe aqui) e `controle-habito-borda`, onde o único serviço é o `app`. O
-cloudflared entra só na segunda: ele precisa alcançar uma porta HTTP, não o
-banco.
+- **nunca troque por `"3000:3000"`.** Além de abrir para a rede, portas
+  publicadas pelo Docker são tratadas na cadeia `DOCKER-USER` do iptables, que é
+  avaliada **antes** das regras do firewall do host: um `ufw deny 3000` não
+  protegeria nada, e a sensação de estar fechado seria falsa;
+- se precisar alcançar o app de outra máquina da rede, use um túnel SSH
+  (`ssh -L 3000:127.0.0.1:3000 servidor`), não um bind mais largo.
+
+O Postgres não publica nada: quem fala com ele está na rede
+`controle-habito-interna`, com os quatro serviços.
 
 Duas imagens de um [Dockerfile](../Dockerfile) só, porque as necessidades são
 opostas: o app quer o mínimo que o rastreamento do Next provou necessário, e o
@@ -102,9 +112,9 @@ Um Linux com:
 - **Docker Engine + Compose v2** (`docker compose version` responde);
 - **git**;
 - um domínio no Cloudflare, com a zona ativa na mesma conta;
-- **um cloudflared já rodando em contêiner** no mesmo host, com um túnel ativo.
-  Se não houver, crie um (Zero Trust › Networks › Tunnels › Create a tunnel ›
-  Docker) e o suba com a rede `controle-habito-borda` — o passo 2 mostra como;
+- **um cloudflared já rodando**, com um túnel ativo entregando ao nginx;
+- **nginx no host**, distribuindo por `server_name`, com um diretório de
+  `conf.d`/`sites-enabled` onde cai o `habitos.conf` do passo 2;
 - `openssl`, para gerar as senhas (ou qualquer gerador que você confie).
 
 Node, npm e cliente do Postgres **não** são necessários no host: tudo que precisa
@@ -122,72 +132,86 @@ git clone <url-do-repo> /opt/controle-habito
 cd /opt/controle-habito
 ```
 
-### 2. Ligar o cloudflared que já roda no homelab
+### 2. O domínio no Cloudflare e o `habitos.conf` do nginx
 
-São três coisas: criar a rede compartilhada, pôr o cloudflared nela, e apontar um
-Public Hostname para o app.
+O caminho é **Cloudflare → cloudflared → nginx do host → app**. O túnel entrega
+tudo ao nginx, e quem escolhe a aplicação é o `server_name`.
 
-**2a. A rede.** Uma vez, no host:
-
-```bash
-docker network create controle-habito-borda
-```
-
-Ela é declarada `external: true` nos dois lados justamente para não ser de
-ninguém: se este compose a gerenciasse, um `docker compose down` aqui levaria
-embora a rede do túnel, e a pilha do cloudflared passaria a não subir por uma
-dependência que não está escrita em lugar nenhum do lado dela.
-
-**2b. O cloudflared entra na rede.** No compose **dele**, acrescente a rede ao
-serviço e declare-a externa:
-
-```yaml
-services:
-  cloudflared:
-    # ... o que já existe
-    networks:
-      - habito          # junto das redes que ele já tem
-
-networks:
-  habito:
-    external: true
-    name: controle-habito-borda
-```
-
-E recrie: `docker compose up -d` na pasta dele.
-
-> **Não use `docker network connect habito-borda <contêiner>`** como solução
-> final. Funciona na hora, e é o jeito de testar, mas é um vínculo que se perde
-> no próximo `up -d` do cloudflared — o domínio volta a dar 502 sem nada ter
-> mudado deste lado, e o erro aparece dias depois do que o causou.
-
-**2c. O Public Hostname.** No painel, no túnel que já existe:
-
-| Campo | Valor |
-|---|---|
-| Subdomain | `habitos` (o que você decidiu) |
-| Domain | o seu domínio |
-| Type | `HTTP` |
-| URL | `app:3000` |
-
-`app:3000` é nome de serviço na rede do Docker, não um IP: o compose registra o
-nome do serviço como alias de DNS em cada rede que ele participa, e o DNS interno
-resolve isso para qualquer contêiner da mesma rede — inclusive um de fora desta
-pilha. `habito_app:3000` (o `container_name`) também vale.
-
-Como o `app` ainda não existe, o hostname vai dar 502 até o passo 5. Isso é
-esperado.
+**2a. No painel**, no túnel que já existe, só o hostname novo: um Public Hostname
+para `habitos.seu-dominio.com` apontando para o nginx — o mesmo destino que os
+outros domínios do servidor já usam. Nada aqui aponta para o app.
 
 O TLS é do Cloudflare e é automático. WebAuthn exige HTTPS, e é daqui que ele vem.
 
-> **Não** ponha Cloudflare Access na frente desse hostname. Ele injeta uma tela de
-> login própria, que responderia HTML às chamadas de API do app e impediria o
+**2b. O `habitos.conf`.** O app é um Node ouvindo em `127.0.0.1:3000` (a porta
+que o passo 5 publica), e o nginx é um processo do **host**:
+
+```nginx
+server {
+    listen 80;
+    server_name habitos.seu-dominio.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+
+        # HTTP/1.1 no upstream: o padrão do proxy_pass é 1.0, que não tem
+        # transferência em pedaços — e as telas chegam em streaming
+        # (`cacheComponents` + <Suspense>).
+        proxy_http_version 1.1;
+
+        # Sem esta linha o nginx manda `Host: 127.0.0.1:3000` — o padrão é o
+        # endereço do upstream, não o do cliente. Hoje o app sobrevive a isso
+        # (medido: `/`, `/login`, as APIs e o `/sw.js` respondem, e o 307 para
+        # `/login` sai relativo), mas é o header que qualquer URL absoluta
+        # gerada pelo servidor usaria, e é o que a checagem de origem das Server
+        # Actions do Next compara. Barato de pôr, caro de descobrir faltando.
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-Host  $host;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+
+        # `https` literal, não `$scheme`: a perna cloudflared→nginx é http, e
+        # `$scheme` diria http — mas o navegador falou https com o Cloudflare.
+        proxy_set_header X-Forwarded-Proto https;
+
+        # Para o shell da página aparecer enquanto o resto ainda vem.
+        proxy_buffering off;
+    }
+}
+```
+
+`nginx -t && systemctl reload nginx` e pronto. Três coisas que **não** devem
+entrar nesse arquivo:
+
+- **nenhum `proxy_set_header` para `CF-Connecting-IP`.** O nginx já repassa os
+  headers do cliente que ele não reescreve, e esse é o que o rate limiting lê.
+  Declará-lo à mão é o jeito de quebrá-lo: um `$remote_addr` ali poria o IP do
+  túnel em todos os pedidos, e o bloqueio por IP viraria global. (Ele sobrevive
+  ao padrão do nginx por ter hífens; headers com **underscore** são descartados,
+  o que não é o caso aqui);
+- **nenhum `root`, `alias` ou `try_files`.** `/_next/static` e `/sw.js` estão
+  dentro do contêiner, não no disco do host: um `root` apontando para o
+  filesystem devolveria 404 no service worker, e sem service worker a PWA não
+  instala — o que mata o push no iOS;
+- **nenhuma autenticação do nginx** (`auth_basic`, Access, etc.). Ela responderia
+  às chamadas de API do app e impediria o registro do service worker. A
+  autenticação deste app é a passkey.
+
+E, do lado do Cloudflare, duas que valem o mesmo:
+
+> **Não** ponha Cloudflare Access na frente desse hostname. Ele injeta uma tela
+> de login própria, que responderia HTML às chamadas de API do app e impediria o
 > registro do service worker — sem service worker a PWA não instala, e sem PWA
-> instalada não há push no iOS. A autenticação deste app é a passkey.
+> instalada não há push no iOS.
 >
 > E não crie regra de "Cache Everything" para o domínio. As rotas de API não têm
 > extensão e o Cloudflare não as cacheia por padrão; uma regra ampla cacheando
 > `/api/hoje` mostraria o dashboard de ontem.
+
+A perna nginx→app ser `http` não atrapalha o cookie de sessão: ele é `Secure`
+porque `NODE_ENV` é `production` ([servidor/sessao.ts](../servidor/sessao.ts)), e
+o que o navegador vê é o `https` do Cloudflare.
+
+Até o passo 5 o domínio responde `502` — o upstream ainda não existe. É esperado.
 
 ### 3. Preencher o `.env`
 
@@ -250,9 +274,6 @@ A primeira vez compila as duas imagens (alguns minutos). A ordem é garantida pe
 compose: `app` e `worker` só sobem depois do `migrate` terminar **com sucesso**,
 então ninguém roda sobre schema velho.
 
-Se o compose reclamar que `controle-habito-borda` não foi encontrada, é o passo
-2a que ficou para trás.
-
 Confira:
 
 ```bash
@@ -261,28 +282,28 @@ docker compose logs migrate          # as 9 migrations e os seeds
 docker compose logs -f app worker
 ```
 
-E confira as duas pontas da rede. Primeiro que o nome resolve e responde de
-dentro dela:
+E confira o caminho até o nginx, em três degraus — é o que separa "o app está
+quebrado" de "o nginx não o encontra":
 
 ```bash
-docker run --rm --network controle-habito-borda alpine \
-  wget -q -O- http://app:3000/api/auth/estado
+# 1. a porta está publicada, e só no loopback
+ss -ltnp | grep ':3000'
+#    127.0.0.1:3000  → certo
+#    0.0.0.0:3000    → o `ports:` perdeu o 127.0.0.1
+
+# 2. o app responde nela, do próprio host
+curl -s http://127.0.0.1:3000/api/auth/estado
+#    {"autenticado":false,...}
+
+# 3. o nginx escolhe o server block certo e repassa
+curl -s -H 'Host: habitos.seu-dominio.com' http://127.0.0.1/api/auth/estado
 ```
 
-Um JSON de volta significa que o alias de DNS e a porta estão certos.
-`wget: bad address 'app'` com o `app` saudável é rede errada no serviço.
-
-Depois que o cloudflared está mesmo nela:
-
-```bash
-docker network inspect controle-habito-borda \
-  --format '{{range .Containers}}{{println .Name}}{{end}}'
-```
-
-Tem de listar `habito_app` **e** o contêiner do cloudflared. Se o segundo não
-aparecer, o passo 2b não pegou — ou a pilha dele não foi recriada depois da
-edição. Não tente o teste de dentro do contêiner do cloudflared: a imagem oficial
-é distroless, sem `sh` e sem `wget`, e o erro pareceria ser de rede.
+O degrau 3 é o que o túnel faz, e por isso ele não precisa do túnel para ser
+testado: o `Host` é o que o nginx usa para escolher o `server_name`. Se o 2
+responde e o 3 não, o problema é o `habitos.conf` — e `nginx -T | grep -A5
+habitos` mostra o que o nginx realmente carregou, que não é sempre o que está no
+arquivo que você editou.
 
 ### 6. Primeiro acesso — no aparelho que vai guardar a passkey
 
@@ -326,6 +347,7 @@ testada**.
 | `RP_ID`, `RP_NAME` | seed → `config_app` | **gravados uma vez**; editar depois não muda nada |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | seed → `config_app` | idem. O envio lê do banco, não do ambiente |
 | `VAPID_SUBJECT` | seed → `config_app` | vazio = `https://<RP_ID>` |
+| `HABITO_PORTA_LOCAL` | compose | a porta do host, presa em `127.0.0.1`. O `proxy_pass` do nginx aponta para ela |
 | `TZ` | contêineres | só o carimbo do `docker logs` — ver abaixo |
 | `HABITO_BACKUP_DIR` | compose, scripts | o mesmo valor nos dois |
 | `HABITO_BACKUP_RETENCAO` | `infra/backup.sh` | dias; nunca apaga os 4 mais novos |
@@ -336,9 +358,9 @@ justamente para não herdar o fuso do processo. Mudar o fuso do app é na tela d
 Ajustes.
 
 **Não há variável de túnel.** O token é do cloudflared do homelab e vive na
-configuração dele; o contrato entre as duas pilhas é a rede
-`controle-habito-borda`, não uma credencial copiada. Uma consequência boa: nem
-este `.env` nem um dump deste banco carregam credencial de túnel.
+configuração dele; o contrato desta pilha com o resto do servidor é a porta em
+`127.0.0.1`, não uma credencial copiada. Uma consequência boa: nem este `.env`
+nem um dump deste banco carregam credencial de túnel.
 
 **Por que tanta coisa é lida do banco e não do ambiente:** o `.env` muda junto com
 o deploy, e a passkey gravada no celular não. `rp_id` e o par VAPID precisam
@@ -356,8 +378,12 @@ docker compose logs -f app
 docker compose logs --since 24h worker     # a virada das 04:00 de hoje
 ```
 
-O log do túnel não está aqui: ele é da pilha do cloudflared, e é lá que se olha
-quando o domínio não responde mas o `app` está saudável.
+Nem o log do nginx nem o do túnel estão aqui — são do host, e é para lá que se
+olha quando o `app` está saudável e o domínio não responde:
+
+```bash
+sudo tail -f /var/log/nginx/error.log      # "connect() failed" = upstream caído
+```
 
 O worker só escreve linha quando acontece algo — ele roda 1440 vezes por dia, e um
 log por tique enterraria o que importa.
@@ -425,7 +451,8 @@ Isto **invalida a biometria**. O navegador amarra a passkey ao hostname, e não 
 como migrá-la.
 
 1. backup (`./infra/backup.sh`);
-2. no Cloudflare, aponte o Public Hostname novo para `app:3000`;
+2. no Cloudflare, um Public Hostname novo para o nginx, e o `server_name` do
+   `habitos.conf` trocado para o domínio novo (`nginx -t && systemctl reload nginx`);
 3. `RP_ID` novo no `.env`;
 4. grave o novo valor no banco — o seed não sobrescreve:
    ```bash
@@ -539,9 +566,11 @@ Se os cinco passos fecharem, o backup é um backup.
 | `migrate` sai com erro de conexão | `POSTGRES_PASSWORD` com caractere que quebra a URL (`@`, `:`, `/`, `#`) |
 | `migrate` reclama de `APP_SENHA_INICIAL` | primeira subida com a variável vazia |
 | `app` fica `unhealthy` | o healthcheck chama `/api/auth/estado`, que consulta o banco; `docker compose logs app` mostra o erro por trás |
-| túnel de pé, `502` no domínio | o Public Hostname aponta para algo que não é `app:3000`, ou o `app` ainda não está saudável |
-| `502` depois de meses funcionando, sem deploy aqui | o cloudflared saiu da rede `controle-habito-borda`: a ligação foi feita com `docker network connect` em vez de declarada no compose dele, e um recreate a desfez. `docker network inspect controle-habito-borda` lista quem está dentro |
-| `network controle-habito-borda declared as external, but could not be found` | o `docker network create` do passo 2a |
+| `502` no domínio | o `app` não está saudável, ou o `proxy_pass` aponta para porta errada. Os três degraus do passo 5 dizem qual |
+| `nginx: host not found in upstream "app"` | `proxy_pass http://app:3000` num nginx do **host**: `app` é nome na rede do Docker, e um processo do host não resolve. Tem de ser `http://127.0.0.1:3000` |
+| nginx recusa recarregar, `bind() to 0.0.0.0:80 failed` | outro `server` já ocupa a 80 sem `server_name` distinto, ou um `listen 80 default_server` duplicado |
+| o app responde no `curl` do host mas não pelo domínio | o `server_name` não casa com o hostname do Public Hostname, ou outro `server` block o pegou antes. `nginx -T` mostra o que está carregado de verdade |
+| tudo funciona menos a PWA, `/sw.js` dá 404 | algum `root`, `alias` ou `try_files` no `habitos.conf`: os estáticos estão dentro do contêiner, não no disco do host |
 | app sem CSS, PWA não instala | `.next/static` ou `public/` não foram para a imagem — rebuild sem cache |
 | a tela de login mostra o aviso de modo desenvolvimento | `APP_MODO` no `.env` do servidor não é `producao` |
 | biometria recusada depois de ter funcionado | o `rp_id` em `config_app` não é o domínio em uso |

@@ -458,7 +458,7 @@ Dividida em duas: o que se escreve no repositório, e o que só existe com o ser
 ### 5.1 Preparação (no repositório)
 
 - [x] `output: 'standalone'` no [next.config.ts](../next.config.ts) e [Dockerfile](../Dockerfile) multi-stage
-- [x] `docker-compose.yml` de produção: `postgres`, `migrate`, `app`, `worker` — e o túnel **fora** da pilha
+- [x] `docker-compose.yml` de produção: `postgres`, `migrate`, `app`, `worker` — túnel e nginx **fora** da pilha
 - [x] migrations aplicadas na subida, antes de app e worker existirem
 - [x] `infra/backup.sh` com `pg_dump` verificado e retenção, e `infra/restaurar.sh`
 - [x] `.env.producao.example` separado do de desenvolvimento
@@ -469,15 +469,15 @@ Dividida em duas: o que se escreve no repositório, e o que só existe com o ser
 
 As duas imagens foram construídas e a pilha foi exercitada local­mente — `migrate` aplicando as 9 migrations e os seeds de produção (com o de desenvolvimento se recusando por `NODE_ENV`), `app` saudável respondendo `/api/auth/estado` do Postgres do compose, `worker` de pé, `backup.sh` escrevendo e conferindo um dump, `restaurar.sh` devolvendo o banco ao estado dele e a CLI de reset rodando pela imagem do worker.
 
-**O túnel saiu da pilha.** A primeira escrita subia um `cloudflared` com um `TUNNEL_TOKEN` no `.env`, e o homelab já tem um, com o token da conta e todas as rotas num lugar só — um segundo seria uma segunda credencial para administrar e um segundo lugar onde olhar quando o domínio não responde. O que ficou é a rede `controle-habito-borda`, `external: true` nas duas pilhas, com o `app` como único serviço dela. Três coisas que a troca fixou:
+**O túnel saiu da pilha, e o nginx entrou no caminho.** A primeira escrita subia um `cloudflared` com um `TUNNEL_TOKEN` no `.env`. O homelab já tem um — e ele não fala com aplicação nenhuma: entrega tudo ao **nginx do host**, que distribui por `server_name`. O caminho é `Cloudflare → cloudflared → nginx → app`, e o que esta pilha oferece é uma porta: `127.0.0.1:${HABITO_PORTA_LOCAL:-3000}:3000`.
 
-- **Rede, e não `ports: 127.0.0.1:3000:3000`.** A porta no loopback funcionaria, e daria um segundo caminho até o app — sem `CF-Connecting-IP` — para qualquer processo do host. Pela rede não há caminho alternativo nenhum, e a suposição de `ipDoPedido()` continua verdadeira.
-- **Duas redes.** `controle-habito-interna` tem os quatro serviços e é onde o Postgres existe; a `borda` tem só o `app`. Uma rede só daria ao cloudflared acesso ao banco junto, e ele precisa alcançar uma porta HTTP.
-- **A rede é externa de propósito.** Gerenciada por este compose, um `docker compose down` daqui levaria embora a rede que o túnel usa, e a pilha do cloudflared passaria a não subir por uma dependência não escrita do lado dela. O custo é um `docker network create` antes da primeira subida, e o compose diz exatamente isso quando falta.
+Três coisas que a troca fixou:
 
-Do lado do cloudflared a rede tem de ser **declarada no compose dele**, não ligada com `docker network connect`: o connect é um vínculo perdido no próximo recreate, e o 502 chega dias depois do que o causou.
+- **Rede compartilhada não resolveria.** A tentativa intermediária foi uma rede `external` para o proxy entrar e usar `proxy_pass http://app:3000`. Funciona se o proxy for contêiner; o nginx é processo do host, e ali o `app` não existe — `nginx: host not found in upstream "app"`.
+- **O bind no loopback é a parte que importa.** `CF-Connecting-IP` é escrito pelo Cloudflare e repassado intacto pelo nginx; um pedido por outro caminho não o tem, e `ipDoPedido()` devolve `127.0.0.1` para todo mundo, virando bloqueio global. O `127.0.0.1:` restringe esse caminho a processos do próprio host — onde o nginx mora, e onde quem tem acesso já tem o volume do Postgres. Com `"3000:3000"` seria a rede local inteira, e sem proteção de firewall: portas do Docker passam pela cadeia `DOCKER-USER`, antes das regras do host.
+- **O `habitos.conf` tem três armadilhas**, e todas estão escritas no passo 2 do Deploy: sem `proxy_set_header Host $host` o upstream recebe `Host: 127.0.0.1:3000`; declarar `CF-Connecting-IP` à mão é o jeito de quebrar o rate limiting (o nginx já o repassa); e qualquer `root`/`alias`/`try_files` devolve 404 em `/sw.js`, porque os estáticos estão dentro do contêiner — sem service worker a PWA não instala, e sem PWA não há push no iOS.
 
-A rede foi exercitada sem o cloudflared, com um contêiner de fora da pilha: `app:3000` e `habito_app:3000` respondem `/api/auth/estado` de dentro da `borda`, `postgres` nem resolve por DNS a partir dela, e um `docker compose down -v` leva a `interna` e deixa a `borda` de pé. O que falta é o túnel de verdade.
+A porta foi exercitada localmente: publicada e visível só em `127.0.0.1`, com `/api/auth/estado` respondendo nela de fora do Docker. O que falta é o nginx de verdade, com o túnel na frente.
 
 Quatro coisas que a escrita encontrou:
 
@@ -491,7 +491,7 @@ E uma decisão que vale registrar: **nenhuma porta publicada no host**. O rate l
 ### 5.2 Execução (no servidor)
 
 - [ ] domínio definido e `rp_id` gravado — **imutável depois**, mudar invalida a biometria
-- [ ] rede `controle-habito-borda` criada, o cloudflared do homelab declarando-a no compose dele, e um Public Hostname novo apontando para `app:3000`
+- [ ] Public Hostname novo para o nginx e `habitos.conf` com `proxy_pass http://127.0.0.1:3000`
 - [ ] par VAPID gerado e registrado em `config_app`
 - [ ] primeiro acesso, cadastro da biometria e a senha recusada em seguida
 - [ ] PWA instalada no celular — último item pendente da etapa 2

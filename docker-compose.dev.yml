@@ -1,5 +1,5 @@
 # Postgres de desenvolvimento. O de produção é o docker-compose.yml, com os
-# quatro serviços e sem porta publicada.
+# quatro serviços e uma única porta publicada, presa no loopback.
 services:
   postgres:
     image: postgres:16-alpine

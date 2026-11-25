@@ -1,13 +1,17 @@
-# Compose de produção: quatro serviços no homelab, nenhuma porta publicada.
+# Compose de produção: quatro serviços no homelab, atrás do nginx do host.
 #
 #                                   ┌────────────┐
 #                                   │ Cloudflare │ ◀── celular, pelo domínio
 #                                   └─────▲──────┘
 #   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┼ ─ ─ túnel saindo ─ ─ ─ ─ ─ ─ ─ ─
 #   ┌─────────────────────────┐           │
-#   │ cloudflared do homelab  │ ──────────┘      FORA desta pilha: é o túnel
-#   └──────┬──────────────────┘                  que já administra as rotas
-#          │ http://app:3000                     da conta. Ver `networks`.
+#   │ cloudflared do homelab  │ ──────────┘   ambos FORA desta pilha: o túnel
+#   └──────┬──────────────────┘               manda tudo para o nginx, e o
+#          │                                  nginx distribui por domínio.
+#   ┌──────▼──────────────────┐
+#   │ nginx do host           │  habitos.conf → proxy_pass 127.0.0.1:3000
+#   └──────┬──────────────────┘
+#          │ 127.0.0.1:3000 (loopback do host, não a rede local)
 # ┌────────▼────┐      ┌────────┐      ┌──────────┐
 # │     app     │      │ worker │      │ migrate  │ (roda uma vez e sai)
 # └──────┬──────┘      └───┬────┘      └────┬─────┘
@@ -16,16 +20,18 @@
 #                │ postgres │  volume nomeado, sem porta no host
 #                └──────────┘
 #
-# **Nenhum `ports:` aqui, e isso é segurança, não economia.** O rate limiting
-# conta tentativas por `CF-Connecting-IP`, header que só o Cloudflare escreve
-# (ver servidor/pedido.ts). Publicar a porta do app daria um caminho sem esse
-# header, onde `ipDoPedido()` cai em 127.0.0.1 para todo mundo: o bloqueio por IP
-# viraria um bloqueio global, e cinco erros de digitação trancariam o app
-# inclusive para quem sabe a senha. O único caminho de entrada é o túnel.
+# **A única porta publicada é a do app, e só em 127.0.0.1.** O rate limiting
+# conta tentativas por `CF-Connecting-IP`, header que o Cloudflare escreve e o
+# nginx repassa intacto (ver servidor/pedido.ts). Um pedido que chegue por outro
+# caminho não tem esse header, e `ipDoPedido()` cai em 127.0.0.1 para todo mundo:
+# cinco erros de digitação trancariam o app inclusive para quem sabe a senha.
 #
-# É por isso que o cloudflared entra numa REDE do compose em vez de apontar para
-# uma porta do host: o header continua sendo escrito pelo Cloudflare e não há
-# caminho alternativo até o app. Ver o bloco `networks` no fim do arquivo.
+# O `127.0.0.1:` do `ports:` é o que mantém esse caminho alternativo restrito a
+# processos deste host — que é onde o nginx mora, e onde quem já tem acesso
+# também tem o volume do Postgres. O que ele impede é a rede local inteira ter
+# uma porta de entrada sem túnel. **Nunca troque por `"3000:3000"`.**
+#
+# O Postgres não publica nada: quem fala com ele está na rede `interna`.
 #
 # Variáveis: copie `.env.producao.example` para `.env` ao lado deste arquivo.
 
@@ -109,14 +115,17 @@ services:
     restart: unless-stopped
     env_file: .env
     environment: *ambiente-do-app
-    # `expose` e não `ports`: visível para quem está na rede `borda` — o
-    # cloudflared do homelab —, invisível para a rede do host. Ver a nota no topo.
-    expose:
-      - "3000"
-    # O único serviço nas duas: `interna` para falar com o Postgres, `borda` para
-    # o túnel o alcançar. O worker não entra na `borda` porque nada de fora
-    # precisa chamá-lo.
-    networks: [interna, borda]
+    # A porta, **presa no loopback**. Ver a nota no topo do arquivo: o `127.0.0.1:`
+    # não é enfeite, é a diferença entre "o nginx deste host alcança" e "a rede
+    # local alcança". Sem ele o Docker publica em 0.0.0.0 e, pior, o faz pela
+    # cadeia DOCKER-USER do iptables — que passa por cima da regra do firewall do
+    # host, então um `ufw deny 3000` não protegeria nada.
+    #
+    # A porta do host é configurável porque num homelab a 3000 é disputada; a de
+    # dentro do contêiner é fixa, é o PORT da imagem.
+    ports:
+      - "127.0.0.1:${HABITO_PORTA_LOCAL:-3000}:3000"
+    networks: [interna]
     depends_on:
       postgres:
         condition: service_healthy
@@ -161,49 +170,22 @@ volumes:
   # vira prefixo). É o que o backup e a restauração em infra/ pressupõem.
   postgres:
 
-# Duas redes, e a divisão é o contrato com o túnel.
+# Uma rede, e nada de fora entra nela.
 #
-# **Não há serviço `cloudflared` nesta pilha.** O homelab já roda um, com o
-# token da conta e todas as rotas num lugar só; um segundo túnel seria uma
-# segunda credencial para administrar e um segundo lugar onde olhar quando o
-# domínio não responde. O que esta pilha faz é oferecer uma rede para ele entrar.
+# **Não há serviço `cloudflared` nem `nginx` nesta pilha.** O homelab já roda os
+# dois: o túnel com o token da conta e todas as rotas num lugar só, e o nginx
+# distribuindo por domínio para cada aplicação do servidor. Um segundo de
+# qualquer um deles seria uma segunda credencial ou um segundo lugar onde olhar
+# quando o domínio não responde.
 #
-# `name:` explícito nas duas de propósito: sem ele o compose prefixaria com o
-# `name:` do topo, e o nome que se digita do lado do cloudflared mudaria se o
-# projeto fosse renomeado. Estes dois nomes são a interface pública daqui.
+# A ligação com eles é a porta em `127.0.0.1` no serviço `app`, e não uma rede
+# compartilhada, porque o nginx **não é um contêiner**: um processo do host não
+# resolve `app` pelo DNS do Docker, e `proxy_pass http://app:3000` falha ali com
+# "host not found in upstream". Ver Docs/Deploy.md, passo 2.
+#
+# `name:` explícito de propósito: sem ele o compose prefixaria com o `name:` do
+# topo, e o nome mudaria junto com o do projeto.
 networks:
   # Onde os quatro serviços se falam. O Postgres só existe aqui.
   interna:
     name: controle-habito-interna
-
-  # A entrada, e o único serviço nela é o `app`.
-  #
-  # Crie-a uma vez, à mão, antes da primeira subida:
-  #
-  #     docker network create controle-habito-borda
-  #
-  # `external: true` porque ela é de DUAS pilhas e de nenhuma: o cloudflared do
-  # homelab também a declara. Deixá-la gerenciada por este compose faria um
-  # `docker compose down` daqui levar embora a rede que o túnel usa, e a pilha
-  # dele passaria a não subir — por uma dependência que não está escrita em
-  # lugar nenhum do lado dele. Externa, cada lado só a referencia.
-  #
-  # Do lado do cloudflared, declare assim (e não com
-  # `docker network connect`, que é um vínculo perdido no próximo recreate dele,
-  # devolvendo 502 no domínio sem nada ter mudado deste lado):
-  #
-  #     networks:
-  #       habito:
-  #         external: true
-  #         name: controle-habito-borda
-  #
-  # Com ele na rede, o Public Hostname aponta para `http://app:3000`: o compose
-  # registra o nome do serviço como alias de DNS em cada rede que o serviço
-  # participa, e o DNS interno do Docker resolve isso para qualquer contêiner da
-  # mesma rede, inclusive os de fora desta pilha. `habito_app:3000` também vale.
-  #
-  # Duas redes e não uma porque uma só daria ao cloudflared acesso ao Postgres
-  # junto. Ele precisa alcançar uma porta HTTP; não precisa alcançar o banco.
-  borda:
-    external: true
-    name: controle-habito-borda

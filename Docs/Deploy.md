@@ -146,6 +146,12 @@ openssl rand -base64 18   # APP_SENHA_INICIAL
 Preencha também `RP_ID`, `TUNNEL_TOKEN` e `APP_USUARIO_NOME`, e confirme
 `APP_MODO=producao`.
 
+**`RP_ID` é a linha para conferir duas vezes** — é o hostname exato, sem
+`https://` e sem barra no fim. Ele vem vazio no exemplo justamente para não haver
+um valor plausível a ser gravado por distração: vazio, o app recusa o cadastro da
+passkey com um erro claro e você preenche e re-semeia; errado, ele grava um
+domínio que depois só sai com um `UPDATE` à mão.
+
 A ordem importa: o compose monta a `DATABASE_URL` a partir de
 `POSTGRES_PASSWORD` e **recusa qualquer comando** enquanto ela estiver vazia —
 inclusive o próximo, que não tem nada a ver com banco.
@@ -370,8 +376,12 @@ O que ele faz, e por quê:
 Na crontab do usuário que roda o compose (`crontab -e`):
 
 ```cron
-15 4 * * * cd /opt/controle-habito && ./infra/backup.sh >> /var/log/habito-backup.log 2>&1
+15 4 * * * cd /opt/controle-habito && ./infra/backup.sh >> "$HOME/habito-backup.log" 2>&1
 ```
+
+O log no `$HOME` e não em `/var/log`: a crontab aqui é a do usuário que roda o
+compose, e um `>>` em `/var/log` falharia por permissão — sem saída nenhuma, o
+que faz o backup parecer que não rodou.
 
 **04:15** e não 03:00: a virada do dia lógico é às 04:00, e é nela que o worker
 fecha os períodos. Um dump quinze minutos depois pega o dia já assentado.

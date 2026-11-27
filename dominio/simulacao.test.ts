@@ -364,18 +364,25 @@ describe("pausa", () => {
 });
 
 describe("configuração versionada", () => {
+  /*
+   * A régua que muda é a **meta do tipo**, e não `metaOcorrencias`: a cadência
+   * aqui é diária, a unidade do modo flexível é o dia, e o contrato limita a
+   * meta de ocorrências a 1 nessa cadência — pedir 2 descreveria um hábito que
+   * não dá para marcar (`Docs/fixes/01`). O domínio aceitaria, porque ele não
+   * conhece o contrato; o teste é que não deve ensinar a combinação.
+   */
   it("avalia cada período pela regra vigente na época", () => {
     const antiga = config({
       id: "v1",
       vigenteDe: d("2026-11-01"),
       vigenteAte: d("2026-11-02"),
-      modo: { tipo: "flexivel", metaOcorrencias: 1 },
+      meta: { tipo: "quantificado", valor: 1 },
     });
     const nova = config({
       id: "v2",
       vigenteDe: d("2026-11-03"),
       vigenteAte: null,
-      modo: { tipo: "flexivel", metaOcorrencias: 2 },
+      meta: { tipo: "quantificado", valor: 2 },
     });
 
     const resultado = rodar({

@@ -444,6 +444,13 @@ function PassoCadencia({ rascunho, muda, erroDe }: PropsDePasso) {
 
 function PassoModo({ rascunho, muda, erroDe }: PropsDePasso) {
   const soFlexivel = rascunho.cadencia === "cada_n_dias";
+  /*
+   * Diário flexível não tem meta a escolher: o período é um dia, a unidade do
+   * modo flexível é o dia, e 1 é o único valor cumprível. O campo dá lugar à
+   * nota que manda para o modo fixo — sem ela, quem queria duas vezes por dia
+   * procuraria um campo que simplesmente não está mais ali.
+   */
+  const diarioFlexivel = rascunho.cadencia === "diario" && rascunho.modo === "flexivel";
 
   return (
     <>
@@ -462,7 +469,10 @@ function PassoModo({ rascunho, muda, erroDe }: PropsDePasso) {
             {
               valor: "flexivel",
               rotulo: "Flexível",
-              descricao: "N vezes dentro do período, quando der.",
+              descricao:
+                rascunho.cadencia === "diario"
+                  ? "Uma vez no dia, a qualquer hora."
+                  : "N vezes dentro do período, quando der.",
             },
             {
               valor: "fixo",
@@ -474,7 +484,15 @@ function PassoModo({ rascunho, muda, erroDe }: PropsDePasso) {
         />
       )}
 
-      {rascunho.modo === "flexivel" || soFlexivel ? (
+      {diarioFlexivel ? (
+        <Nota tom="forte">
+          Em <strong className="text-texto">diário</strong> o período é um dia, então a meta é{" "}
+          <strong className="text-texto">uma</strong> conclusão — o dia não cabe mais de uma. Para
+          marcar <strong className="text-texto">duas vezes por dia</strong>, escolha o modo{" "}
+          <strong className="text-texto">fixo</strong> e declare dois horários: cada um vira uma
+          linha marcável no painel de hoje, com lembrete próprio.
+        </Nota>
+      ) : rascunho.modo === "flexivel" || soFlexivel ? (
         <Campo
           rotulo="Quantas vezes no período"
           erro={erroDe("config.metaOcorrencias")}

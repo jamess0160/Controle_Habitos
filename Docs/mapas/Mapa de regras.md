@@ -55,17 +55,19 @@ A configuração tem **uma** cadência e **um** modo, mutuamente exclusivo. Isso
 
 **Modo** — define como o período é cumprido:
 
-- `flexivel` — meta de `meta_ocorrencias` conclusões em qualquer momento do período. Ex.: academia 3x por semana, tanto faz o dia.
+- `flexivel` — meta de `meta_ocorrencias` conclusões em qualquer momento do período. Ex.: academia 3x por semana, tanto faz o dia. **A unidade contada é o dia lógico**: um dia que atinge a meta do tipo conta uma conclusão, e dois registros no mesmo dia continuam valendo uma.
 - `fixo` — conclusões em momentos determinados, declarados em `dias_semana`, `dias_mes` e/ou `horarios`. Cada momento é uma **ocorrência** própria, marcável e notificável de forma independente. Ex.: remédio todo dia às 08:00 e 20:00 (duas ocorrências por período).
 
 Combinações válidas:
 
 | Cadência | `flexivel` | `fixo` |
 |---|---|---|
-| `diario` | meta N vezes no dia | `horarios[]` |
+| `diario` | `meta_ocorrencias` **sempre 1** | `horarios[]` |
 | `cada_n_dias` | meta N vezes na janela | **não permitido** |
 | `semanal` | meta N vezes na semana | `dias_semana[]` (+ `horarios[]` opcional) |
 | `mensal` | meta N vezes no mês | `dias_mes[]` (+ `horarios[]` opcional) |
+
+> **`diario` + `flexivel` aceita só `meta_ocorrencias = 1`.** Como a unidade contada é o dia e o período diário tem um dia dentro, qualquer valor acima é inalcançável: a tela mostrava `1/2` com a marca cheia, o toque desmarcava em vez de somar, e o período fechava `falhou` num dia cumprido. **N vezes por dia se faz no modo `fixo`, com N horários** — é o exemplo do remédio acima, e cada horário vira uma linha marcável com lembrete próprio. A regra está no CHECK `habito_config_meta_diaria` e no contrato; o porquê inteiro está em [Docs/fixes/01](../fixes/01%20-%20Diario%20flexivel%20limitado%20a%201.md). Esta célula já disse "meta N vezes no dia", que era a intenção original e nunca foi o que o código fez.
 
 > `cada_n_dias` aceita só o modo `flexivel`: com a janela ancorada na última conclusão, ela anda no calendário, e horários fixos dentro de uma janela móvel não descrevem nada. O lembrete desse hábito usa `notificar_em` e cai no **dia do vencimento**.
 
@@ -97,7 +99,7 @@ Nas cadências de calendário, a primeira janela é recortada no início do háb
 ## Período e ocorrência
 
 - **Período** é a janela de avaliação. É materializado no banco quando começa, não calculado em tempo de leitura — porque a auditoria da sequência e o consumo de congelamento exigem um registro estável.
-- **Ocorrência** é a unidade marcável. No modo `fixo` existe uma por momento previsto. No modo `flexivel` não há momentos previstos: os registros se ligam direto ao período e a meta é contada por soma.
+- **Ocorrência** é a unidade marcável. No modo `fixo` existe uma por momento previsto. No modo `flexivel` não há momentos previstos: os registros se ligam direto ao período, e a unidade contada é o **dia lógico** — os registros são agrupados por `data_logica`, cada grupo que atinge a meta do tipo vale uma conclusão, e `meta_ocorrencias` conta esses dias. É daí que vem o limite de 1 na cadência diária: ela tem um dia só por período.
 
 **Janela sem momento devido não é período.** No modo `fixo`, uma janela em que nenhum momento previsto cai simplesmente não gera período: não há o que cumprir nem o que perder, e a sequência não é tocada. Acontece em dois casos reais — hábito de segunda/quarta/sexta criado num sábado (a primeira janela, recortada no `inicio_em`, só tem o sábado) e `dias_mes: [31]` num mês de 30 dias. Sem essa regra a janela fecharia como `falhou` e zeraria a sequência por um período em que o hábito não devia nada.
 

@@ -144,7 +144,17 @@ describe("montarHoje", () => {
 
   describe("progresso", () => {
     it("binário mostra o período, porque a interação é binária", async () => {
-      const habito = await criar("🏃 Correr", config({ metaOcorrencias: 3 }));
+      /*
+       * Semanal, não diário: a unidade do modo flexível é o dia, então
+       * `metaOcorrencias: 3` numa cadência diária é inalcançável e o contrato a
+       * recusa. Este teste já afirmou `1/3` num hábito diário — descrevendo
+       * como correto o bug do `Docs/fixes/01`. Na semana, 3x é legítimo e o
+       * ponto do teste (o binário mostra o **período**) é o mesmo.
+       */
+      const habito = await criar(
+        "🏃 Correr",
+        config({ cadencia: { tipo: "semanal" }, metaOcorrencias: 3 }),
+      );
 
       let { linhas } = await montarHoje();
       expect(linhas[0].progresso).toEqual({ tipo: "binario", concluidas: 0, meta: 3 });

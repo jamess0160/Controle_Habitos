@@ -25,6 +25,10 @@ import {
  * `modo: "fixo"` nem compila. É a tabela de CHECKs da migration existindo
  * também no tipo, que era o objetivo da etapa 1.4.
  *
+ * Existe **um** refinement, em `configFlexivel`, e a nota dele explica por quê:
+ * a regra relaciona dois campos irmãos e nenhuma aninhação a tornaria
+ * estrutural sem reescrever a união de cadências.
+ *
  * Por que a cadência e a meta são objetos aninhados em vez de campos irmãos:
  * `z.discriminatedUnion` não aceita intersecção como opção (testado na v4.6) e
  * não há como discriminar por duas chaves irmãs ao mesmo tempo. Aninhar resolve
@@ -150,7 +154,56 @@ const configFixo = z.strictObject({
   congelamento,
 });
 
-export const configHabito = z.discriminatedUnion("modo", [configFlexivel, configFixo]);
+// ─── A meta diária ───────────────────────────────────────────────────────────
+
+/**
+ * A única regra deste contrato que **não** é estrutural, e a exceção tem motivo.
+ *
+ * No modo flexível a unidade contável é o **dia lógico** (`agrupar` em
+ * `dominio/simulacao.ts` faz um grupo por `dataLogica`), então a cadência diária
+ * tem exatamente uma unidade dentro da janela e `metaOcorrencias` satura em 1.
+ * Pedir 2 era aceito e inalcançável: a tela mostrava `1/2` com a marca cheia, o
+ * toque desmarcava em vez de somar, e o período fechava `falhou` num dia
+ * cumprido. Duas vezes por dia se faz no modo **fixo**, com dois horários — lá
+ * cada momento é uma ocorrência própria, marcável e notificável.
+ *
+ * Estruturalmente, a saída seria mover `metaOcorrencias` para dentro da união de
+ * cadências, e aí a regra relaciona dois campos **irmãos** (`cadencia.tipo` e
+ * `metaOcorrencias`): exatamente o que `z.discriminatedUnion` não discrimina.
+ *
+ * **Fica na união, e não dentro de `configFlexivel`, por dois motivos
+ * descobertos em execução.** A zod 4 recusa *sobrescrever* chave de objeto com
+ * refinement ("Cannot overwrite keys on object schemas containing refinements"),
+ * e `editarHabito()` sobrescreve `meta` — com o refinement no objeto, o `extend`
+ * dali compilava e lançava dentro do PATCH. O `safeExtend` que a própria zod
+ * indica resolve isso, mas não aceita o schema indexado por genérico de
+ * `META_POR_TIPO[tipo]`; e construir a variante por uma fábrica genérica faz a
+ * inferência cair no *constraint* do parâmetro, o que apagaria o estreitamento
+ * de tipo que é a razão de `editarHabito` receber o tipo do hábito.
+ *
+ * O preço é a regra ser aplicada nas duas uniões — aqui e em `editarHabito` —,
+ * e é só a aplicação que se repete: o predicado e a mensagem são estes.
+ */
+function metaDiariaCumprivel(config: {
+  modo: string;
+  cadencia: { tipo: string };
+  metaOcorrencias?: number;
+}): boolean {
+  if (config.modo !== "flexivel" || config.cadencia.tipo !== "diario") return true;
+  return (config.metaOcorrencias ?? 1) <= 1;
+}
+
+/** `path` aponta para o campo: é o que leva o formulário ao passo do erro. */
+const ERRO_META_DIARIA = {
+  error:
+    "Na cadência diária o período é um dia só, então a meta é 1. " +
+    "Para duas vezes por dia, use o modo fixo com dois horários.",
+  path: ["metaOcorrencias"],
+};
+
+export const configHabito = z
+  .discriminatedUnion("modo", [configFlexivel, configFixo])
+  .refine(metaDiariaCumprivel, ERRO_META_DIARIA);
 
 export type ConfigHabito = z.infer<typeof configHabito>;
 
@@ -178,14 +231,21 @@ export type CriarHabito = z.infer<typeof criarHabito>;
  * troca para as versões antigas, que então quebrariam os CHECKs de meta. O
  * cliente já conhece o tipo do hábito que está editando, então estreitar aqui
  * não custa nada e faz o erro aparecer em tempo de compilação.
+ *
+ * A regra da meta diária é aplicada aqui também, pelo mesmo predicado: sem isto,
+ * a configuração impossível entraria pela edição, que é por onde ela é mais
+ * provável — o hábito já existe e a pessoa está justamente tentando ajustá-lo.
+ * Ver a nota de `metaDiariaCumprivel` sobre por que ela mora na união.
  */
 export function editarHabito<T extends TipoHabito>(tipo: T) {
   const metaDoTipo = META_POR_TIPO[tipo];
 
-  const configDoTipo = z.discriminatedUnion("modo", [
-    configFlexivel.extend({ meta: metaDoTipo }),
-    configFixo.extend({ meta: metaDoTipo }),
-  ]);
+  const configDoTipo = z
+    .discriminatedUnion("modo", [
+      configFlexivel.extend({ meta: metaDoTipo }),
+      configFixo.extend({ meta: metaDoTipo }),
+    ])
+    .refine(metaDiariaCumprivel, ERRO_META_DIARIA);
 
   return z.strictObject({
     nome: nomeDeHabito.optional(),

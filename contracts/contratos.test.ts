@@ -97,6 +97,46 @@ describe("combinações de configuração que não existem", () => {
     expect(r.success).toBe(false);
   });
 
+  /*
+   * A unidade do modo flexível é o dia lógico, então o período diário tem uma
+   * unidade só e `metaOcorrencias` satura em 1. Pedir 2 era aceito e
+   * inalcançável: `1/2` na tela, marca cheia, toque desmarcando, e o período
+   * fechando `falhou` num dia cumprido. Ver `Docs/fixes/01`.
+   */
+  it("recusa meta acima de 1 na cadência diária (o dia não cabe duas)", () => {
+    const r = configHabito.safeParse({
+      ...base,
+      modo: "flexivel",
+      cadencia: { tipo: "diario" },
+      metaOcorrencias: 2,
+      notificarEm: null,
+    });
+
+    expect(r.success).toBe(false);
+    /* No campo, não na raiz: é o que leva o formulário ao passo 4. */
+    expect(r.error?.issues.map((i) => i.path.join("."))).toContain("metaOcorrencias");
+  });
+
+  it("aceita meta 1 na cadência diária", () => {
+    const r = configHabito.safeParse({
+      ...base,
+      modo: "flexivel",
+      cadencia: { tipo: "diario" },
+      metaOcorrencias: 1,
+      notificarEm: null,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("duas vezes por dia é modo fixo com dois horários, e isso passa", () => {
+    const r = configHabito.safeParse({
+      ...base,
+      modo: "fixo",
+      cadencia: { tipo: "diario", horarios: ["08:00:00", "21:00:00"] },
+    });
+    expect(r.success).toBe(true);
+  });
+
   it("recusa cada_n_dias com intervalo de 1 dia (isso é diário)", () => {
     const r = configHabito.safeParse({
       ...base,
@@ -400,6 +440,19 @@ describe("o resumo reproduz a frase escrita à mão em cada fixture", () => {
         congelamento: null,
       }),
     ).toBe("Por semana");
+  });
+
+  it("diário flexível é sempre 'Todo dia' — não existe '2x por dia'", () => {
+    expect(
+      resumoDeConfig({
+        modo: "flexivel",
+        cadencia: { tipo: "diario" },
+        metaOcorrencias: 1,
+        notificarEm: null,
+        meta: { tipo: "binario" },
+        congelamento: null,
+      }),
+    ).toBe("Todo dia");
   });
 
   it("cada_n_dias com meta acima de 1 mantém a janela na frase", () => {

@@ -81,8 +81,14 @@ function regraFlexivel(config: ConfigFlexivel): string {
   const vezes = `${n}x`;
 
   switch (config.cadencia.tipo) {
+    /*
+     * Sempre "Todo dia", sem o ramo de `n > 1`: a unidade do modo flexível é o
+     * dia, então a cadência diária satura em 1 e o contrato recusa o resto. A
+     * frase "2x por dia" existiu aqui descrevendo uma configuração que o app
+     * aceitava e não sabia avaliar.
+     */
     case "diario":
-      return n === 1 ? "Todo dia" : `${vezes} por dia`;
+      return "Todo dia";
     case "semanal":
       return n === 1 ? "Por semana" : `${vezes} por semana`;
     case "mensal":

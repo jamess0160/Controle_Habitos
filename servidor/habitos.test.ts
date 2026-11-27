@@ -52,12 +52,21 @@ function novo(sobre: Partial<CriarHabito> = {}): CriarHabito {
  * combinação que o contrato existe para proibir. Escrever a variante inteira é o
  * preço da exclusividade estrutural, e é um preço pequeno.
  */
-function diaria(sobre: { metaOcorrencias?: number; meta?: ConfigHabito["meta"] } = {}): ConfigHabito {
+function diaria(
+  sobre: { notificarEm?: string | null; meta?: ConfigHabito["meta"] } = {},
+): ConfigHabito {
   return {
     modo: "flexivel",
     cadencia: { tipo: "diario" },
-    metaOcorrencias: sobre.metaOcorrencias ?? 1,
-    notificarEm: null,
+    /*
+     * Fixo em 1, e não um parâmetro: na cadência diária o período é um dia, a
+     * unidade do modo flexível é o dia, e o contrato recusa qualquer valor
+     * acima — ver `Docs/fixes/01`. Estes testes usavam `metaOcorrencias: 2 | 3`
+     * só como "outra versão de config"; quem precisa disso varia `notificarEm`,
+     * que não muda a avaliação de período nenhum.
+     */
+    metaOcorrencias: 1,
+    notificarEm: sobre.notificarEm ?? null,
     meta: sobre.meta ?? { tipo: "binario" },
     congelamento: null,
   };
@@ -217,7 +226,7 @@ describe("versionamento de habito_config", () => {
   it("as faixas de vigência não se sobrepõem — é o que `configVigenteEm` assume", async () => {
     const habito = await criarHabitoNoBanco(novo({ config: diaria() }));
     await envelhecer(habito.id, 10);
-    await editarHabitoNoBanco(habito.id, { config: diaria({ metaOcorrencias: 2 }) });
+    await editarHabitoNoBanco(habito.id, { config: diaria({ notificarEm: "20:00:00" }) });
 
     const lista = await versoes(habito.id);
     for (let i = 0; i + 1 < lista.length; i += 1) {
@@ -235,59 +244,74 @@ describe("versionamento de habito_config", () => {
      */
     const habito = await criarHabitoNoBanco(novo({ config: diaria() }));
 
-    await editarHabitoNoBanco(habito.id, { config: diaria({ metaOcorrencias: 2 }) });
-    await editarHabitoNoBanco(habito.id, { config: diaria({ metaOcorrencias: 3 }) });
+    await editarHabitoNoBanco(habito.id, { config: diaria({ notificarEm: "20:00:00" }) });
+    await editarHabitoNoBanco(habito.id, { config: diaria({ notificarEm: "21:30:00" }) });
 
     expect(await versoes(habito.id)).toEqual([
-      expect.objectContaining({ versao: 1, vigente_ate: null, meta_ocorrencias: 3 }),
+      expect.objectContaining({ versao: 1, vigente_ate: null, notificar_em: "21:30:00" }),
     ]);
   });
 
   it("o período passado continua avaliado pela regra que valia nele", async () => {
     /*
-     * A armadilha nº 2 do projeto. O hábito nasce pedindo 1 interação por dia,
-     * acumula uma semana, e então a meta sobe para 4. Os períodos já fechados têm
-     * de continuar com `meta_ocorrencias: 1` — avaliá-los pela régua nova
-     * transformaria uma semana cumprida em uma semana falhada, e a sequência
-     * mudaria sozinha.
+     * A armadilha nº 2 do projeto. O hábito acumula uma semana sob a versão 1 e
+     * então a meta muda. Os períodos já fechados têm de continuar apontando para
+     * a **versão que os governou** — reavaliá-los pela régua nova transformaria
+     * uma semana cumprida em uma semana falhada, e a sequência mudaria sozinha.
+     *
+     * O sinal é o `config_id`, e não `meta_ocorrencias`: numa cadência diária a
+     * meta de ocorrências é sempre 1 (a unidade do flexível é o dia — ver
+     * `Docs/fixes/01`), então ela não distingue versão nenhuma. O que varia aqui
+     * é a meta do tipo, que é a mesma "régua nova" com outro nome.
      */
-    const habito = await criarHabitoNoBanco(novo({ config: diaria() }));
+    const habito = await criarHabitoNoBanco(
+      novo({ config: diaria({ meta: { tipo: "quantificado", valor: 2_000, unidade: "ml" } }) }),
+    );
     await envelhecer(habito.id, 7);
 
     /* Materializa o histórico antigo antes de mexer na regra. */
     await editarHabitoNoBanco(habito.id, { nome: "🏃 Correr" });
 
+    const [v1] = await versoes(habito.id);
+
     const fechadosAntes = await db("habito_periodo")
       .where({ habito_id: habito.id })
       .whereNot({ status: "aberto" })
       .orderBy("inicio", "asc")
-      .select("inicio", "meta_ocorrencias");
+      .select("inicio", "config_id", "meta_ocorrencias", "status");
 
     expect(fechadosAntes.length).toBeGreaterThan(0);
-    expect(fechadosAntes.every((p) => p.meta_ocorrencias === 1)).toBe(true);
+    expect(fechadosAntes.every((p) => p.config_id === v1.id)).toBe(true);
 
-    await editarHabitoNoBanco(habito.id, { config: diaria({ metaOcorrencias: 4 }) });
+    await editarHabitoNoBanco(habito.id, {
+      config: diaria({ meta: { tipo: "quantificado", valor: 3_000, unidade: "ml" } }),
+    });
 
     const fechadosDepois = await db("habito_periodo")
       .where({ habito_id: habito.id })
       .whereNot({ status: "aberto" })
       .orderBy("inicio", "asc")
-      .select("inicio", "meta_ocorrencias");
+      .select("inicio", "config_id", "meta_ocorrencias", "status");
 
     expect(fechadosDepois).toEqual(fechadosAntes);
 
     /*
      * E a regra nova governa de hoje em diante. Numa cadência diária o período
-     * aberto **começa** hoje, então ele já nasce com a meta nova; numa cadência
+     * aberto **começa** hoje, então ele já nasce sob a versão nova; numa cadência
      * semanal o período corrente teria começado sob a regra antiga e a manteria
      * até fechar, que é o comportamento certo e o motivo de a asserção ser sobre
      * a cadência diária.
      */
+    const versoesDepois = await versoes(habito.id);
+    const v2 = versoesDepois.at(-1)!;
+    expect(v2.versao).toBe(2);
+    expect(v2.meta_valor).toBe(3_000);
+
     const aberto = await db("habito_periodo")
       .where({ habito_id: habito.id, status: "aberto" })
-      .first("meta_ocorrencias");
+      .first("config_id");
 
-    expect(aberto?.meta_ocorrencias).toBe(4);
+    expect(aberto?.config_id).toBe(v2.id);
   });
 
   it("o tipo é imutável: o schema de edição só aceita meta do tipo gravado", async () => {

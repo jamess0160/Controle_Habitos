@@ -9,7 +9,7 @@ npm run dev     # dev server (Turbopack) on http://localhost:3000
 npm run build   # production build
 npm run start   # serve the production build
 npm run lint    # eslint (flat config; takes no args by default)
-npm test        # jest (586 casos; exige o db:up rodando)
+npm test        # jest (592 casos; exige o db:up rodando)
 
 npm run db:up        # sobe o Postgres de desenvolvimento (docker-compose.dev.yml)
 npm run db:migrate   # aplica as migrations pendentes
@@ -137,7 +137,7 @@ Três consequências que não são óbvias e que o código documenta no lugar:
 
 ### O que existe
 
-- `db/` — 9 migrations. A `0009` trocou `habito_config.meta_minutos` por `meta_segundos` e converteu o `registro.valor` dos hábitos de duração junto. A `0007` removeu `congelamento.estornado_em` (estorno é a diferença entre dois recálculos, não um evento numa linha) e a `0008` trocou `notificacao_enviada.referencia_id` por `referencia` em texto. `db/teste.ts` cria **um database por worker** do Jest; `db/teste-url.ts` calcula a URL sem arrastar o driver, porque `pg` quebra em `jsdom`.
+- `db/` — 10 migrations. A `0010` limitou `meta_ocorrencias` a 1 na cadência diária (CHECK `habito_config_meta_diaria`). A `0009` trocou `habito_config.meta_minutos` por `meta_segundos` e converteu o `registro.valor` dos hábitos de duração junto. A `0007` removeu `congelamento.estornado_em` (estorno é a diferença entre dois recálculos, não um evento numa linha) e a `0008` trocou `notificacao_enviada.referencia_id` por `referencia` em texto. `db/teste.ts` cria **um database por worker** do Jest; `db/teste-url.ts` calcula a URL sem arrastar o driver, porque `pg` quebra em `jsdom`.
 - `dominio/` — o núcleo puro, com relógio injetado. `simulacao.ts` é o replay.
 - `contracts/` — Zod como fonte única, com `cadencia`/`meta` em uniões discriminadas aninhadas. `contracts/resumo.ts` é a **única** implementação da regra do hábito como frase.
 - `servidor/` — autenticação (Argon2id, sessão de token opaco com SHA-256 no banco, rate limiting em tabela por `CF-Connecting-IP`, WebAuthn com trava de `rp_id`), hábitos, dashboard, registro, retroativo, push e o relógio lógico. `relogio.ts` tem o único `horaDeParede` do projeto.
@@ -156,7 +156,7 @@ Não estavam no mapa de regras, e estão em `worker/notificacoes.ts`:
 
 ### Testes
 
-`npm test` roda 586 casos em 28 arquivos (Jest 30 via `next/jest`). Exige o `db:up` rodando e nada mais — cada worker cria e migra o próprio database.
+`npm test` roda 592 casos em 28 arquivos (Jest 30 via `next/jest`). Exige o `db:up` rodando e nada mais — cada worker cria e migra o próprio database.
 
 Quatro coisas que valem saber antes de escrever um teste aqui:
 
@@ -174,3 +174,5 @@ Além das quatro do topo deste arquivo, estas apareceram em uso e têm teste:
 - **Duas escalas de progresso.** `binario` e `negativo` mostram o **período**; `quantificado` e `duracao` mostram a **interação de hoje**. Somar o incremento nas duas linhas de um hábito fixo mostraria 700 ml em cada dose quando foram 700 numa.
 - **`novoVencimento` vem preenchido em toda resposta de hábito ancorado**, não só quando a âncora se move. A tela compara com o `periodoAtual.fim` que já tem, senão pede confirmação de uma mudança que não houve — e um aviso que aparece sempre deixa de ser aviso.
 - **`web-push` fica no 3.x.** O 4.0 é só-ESM e não publica tipos, enquanto `@types/web-push` descreve o 3.x com default export: a combinação compila e quebra em execução.
+- **A unidade do modo flexível é o dia, não a marcação.** `agrupar()` faz um grupo por `data_logica`, então `meta_ocorrencias` conta **dias** cumpridos e a cadência diária satura em 1. O formulário aceitava "diário, 2 vezes" e o app não tinha como entregar: `1/2` na tela com a marca cheia, o toque desmarcando em vez de somar, e o período fechando `falhou` num dia cumprido. Hoje o CHECK `habito_config_meta_diaria`, o contrato e o passo 4 fecham os três caminhos; **N vezes por dia é modo `fixo` com N horários**. O mapa de regras dizia o contrário ("meta N vezes no dia") desde o começo — ver [Docs/fixes/01](Docs/fixes/01%20-%20Diario%20flexivel%20limitado%20a%201.md).
+- **Refinement em objeto da zod 4 proíbe `extend` que sobrescreve chave.** "Cannot overwrite keys on object schemas containing refinements" — e o erro é de **execução**, com os tipos compilando. `editarHabito()` sobrescreve `meta`, então um `.refine` dentro de `configFlexivel` matava o PATCH e só os testes de rota contavam. O `.safeExtend` indicado pela zod preserva os checks mas recusa o schema indexado por genérico de `META_POR_TIPO[tipo]`; e uma fábrica genérica faz a inferência cair no *constraint*, apagando em silêncio o estreitamento de tipo de `editarHabito`. Por isso a regra da meta diária é um predicado aplicado à **união**, nos dois lugares que a montam.

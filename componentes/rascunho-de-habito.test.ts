@@ -66,6 +66,41 @@ describe("montagem de combinações que as fixtures não cobrem", () => {
     });
   });
 
+  /*
+   * O passo 4 esconde o campo na cadência diária, e esconder sem coagir deixaria
+   * um valor digitado em outra cadência viajar para dentro do payload: o
+   * contrato recusaria e o erro apontaria para um campo que não está mais na
+   * tela. Ver `Docs/fixes/01`.
+   */
+  it("na cadência diária a meta de ocorrências é 1, seja o que o rascunho disser", () => {
+    const config = montarConfig({
+      ...base,
+      modo: "flexivel",
+      cadencia: "diario",
+      metaOcorrencias: "3",
+    });
+
+    expect(exigirValido(configHabito, config, "flexível diário")).toMatchObject({
+      modo: "flexivel",
+      cadencia: { tipo: "diario" },
+      metaOcorrencias: 1,
+    });
+  });
+
+  it("nas outras cadências a meta de ocorrências é respeitada", () => {
+    const config = montarConfig({
+      ...base,
+      modo: "flexivel",
+      cadencia: "semanal",
+      metaOcorrencias: "3",
+    });
+
+    expect(exigirValido(configHabito, config, "flexível semanal")).toMatchObject({
+      cadencia: { tipo: "semanal" },
+      metaOcorrencias: 3,
+    });
+  });
+
   it("a duração é somada das três partes do relógio", () => {
     const config = montarConfig({
       ...base,

@@ -172,7 +172,17 @@ export function montarConfig(r: Rascunho): unknown {
   return {
     modo: "flexivel",
     cadencia,
-    metaOcorrencias: Number(r.metaOcorrencias),
+    /*
+     * Na cadência diária o valor é **1**, e não o que está no rascunho.
+     *
+     * O período diário tem um dia dentro e a unidade do modo flexível é o dia,
+     * então 1 é o único valor cumprível — o contrato recusa o resto. O passo 4
+     * esconde o campo ali, e esconder sem coagir deixaria o "3" digitado numa
+     * cadência semanal viajar para dentro do payload depois de a pessoa voltar
+     * para diário: erro de validação apontando para um campo invisível, que é
+     * pior que a configuração impossível que isto conserta.
+     */
+    metaOcorrencias: r.cadencia === "diario" ? 1 : Number(r.metaOcorrencias),
     /*
      * Ativo com o campo em branco **não** vira `null`: silenciar um lembrete que
      * a pessoa acabou de pedir é pior que a mensagem de validação. O horário

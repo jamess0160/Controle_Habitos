@@ -103,7 +103,11 @@ Todos os hábitos ativos com nome (emoji incluso), cor, resumo da cadência em l
 
 **Ordenação** — padrão por data de criação, com **reordenação manual por arraste**, persistida em `habito.ordem`. A ordem escolhida aqui é a mesma usada no dashboard.
 
-Ações: criar, editar, pausar/retomar, arquivar/desarquivar e abrir o retroativo. Não existe exclusão permanente.
+Ações: criar, editar, pausar/retomar, arquivar/desarquivar e abrir o retroativo.
+
+**Apagar existe, e só no cartão arquivado.** Arquivar atende o hábito que você cumpriu e deixou de lado — ele sai do painel de hoje e o histórico fica. Não atende o hábito **criado errado**, que não deveria ter existido: para esse, a saída é apagar, e ela leva todo o histórico junto. Arquivar é o primeiro de dois passos obrigatórios, para a ação irreversível não ficar a um toque de distância; um hábito ativo é recusado com a mensagem mandando arquivar primeiro.
+
+A confirmação é em dois toques e diz **o estrago em números** — "isto apaga 47 marcações em 23 dias, desde 12/10" —, buscados em `GET /api/habitos/:id/historico` no primeiro toque. Isto é a única operação irreversível do app: todo o resto é replay, e daqui a volta é só a restauração do backup. Um "tem certeza?" sem número seria a pergunta vazia que a contagem existe para evitar. Ver [Docs/fixes/02](../fixes/02%20-%20Apagar%20habito%20arquivado.md).
 
 ## 5. Cadastro / edição de hábito
 

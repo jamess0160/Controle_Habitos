@@ -15,15 +15,18 @@ import { db } from "@/db/knex";
 import { comoDataLogica, somarDias } from "@/dominio/calendario";
 import { encerrarBanco, limpar, semearConfig } from "./apoio-de-teste";
 import {
+  apagarHabitoNoBanco,
   arquivarHabitoNoBanco,
   buscarHabito,
   criarHabitoNoBanco,
   editarHabitoNoBanco,
+  historicoDoHabitoNoBanco,
   listarHabitos,
   pausarHabitoNoBanco,
   reordenarHabitosNoBanco,
   retomarHabitoNoBanco,
 } from "./habitos";
+import { criarRegistroNoBanco } from "./registros";
 import { hojeLogico } from "./relogio";
 
 beforeEach(async () => {
@@ -53,7 +56,11 @@ function novo(sobre: Partial<CriarHabito> = {}): CriarHabito {
  * preço da exclusividade estrutural, e é um preço pequeno.
  */
 function diaria(
-  sobre: { notificarEm?: string | null; meta?: ConfigHabito["meta"] } = {},
+  sobre: {
+    notificarEm?: string | null;
+    meta?: ConfigHabito["meta"];
+    congelamento?: ConfigHabito["congelamento"];
+  } = {},
 ): ConfigHabito {
   return {
     modo: "flexivel",
@@ -68,7 +75,7 @@ function diaria(
     metaOcorrencias: 1,
     notificarEm: sobre.notificarEm ?? null,
     meta: sobre.meta ?? { tipo: "binario" },
-    congelamento: null,
+    congelamento: sobre.congelamento ?? null,
   };
 }
 
@@ -513,6 +520,182 @@ describe("arquivar", () => {
 
     expect(voltou?.ordem).toBeGreaterThan(Math.max(b.ordem, c.ordem));
     expect((await listarHabitos()).habitos.at(-1)?.id).toBe(a.id);
+  });
+});
+
+// ─── Apagar ──────────────────────────────────────────────────────────────────
+
+/**
+ * A única operação irreversível do app, e a única escrita de hábito que não
+ * termina em `materializar()` — não sobrou nada para materializar.
+ *
+ * O que estes testes protegem é a **cascata**: as seis tabelas dependentes somem
+ * por `ON DELETE CASCADE` até `habito`, e isso é configuração de migration, não
+ * código daqui. Uma migration futura que trocasse um `CASCADE` por `RESTRICT`
+ * faria a exclusão passar a estourar erro de FK, e é este arquivo que avisaria.
+ */
+describe("apagar", () => {
+  /** As seis que caem por cascata, com a coluna que liga cada uma ao hábito. */
+  const DEPENDENTES = [
+    ["habito_config", "habito_id"],
+    ["habito_periodo", "habito_id"],
+    ["congelamento", "habito_id"],
+    ["habito_streak", "habito_id"],
+  ] as const;
+
+  async function quantas(tabela: string, coluna: string, habitoId: string): Promise<number> {
+    const [{ c }] = await db(tabela).where({ [coluna]: habitoId }).count({ c: "*" });
+    return Number(c);
+  }
+
+  /** `registro` e `habito_ocorrencia` só se ligam ao hábito pelo período. */
+  async function quantasPeloPeriodo(tabela: string, habitoId: string): Promise<number> {
+    const [{ c }] = await db(tabela)
+      .join("habito_periodo", "habito_periodo.id", `${tabela}.periodo_id`)
+      .where("habito_periodo.habito_id", habitoId)
+      .count({ c: "*" });
+    return Number(c);
+  }
+
+  /**
+   * Um hábito com linha em **todas** as dependentes.
+   *
+   * O congelamento `aCada: 1` não é detalhe: sem ele a config não gera
+   * congelamento nenhum, a pré-asserção de que há o que apagar passaria batido
+   * naquela tabela, e a cascata de `congelamento` ficaria sem teste. Uma
+   * marcação fecha o dia, a sequência vira 1 e o primeiro congelamento é ganho.
+   */
+  async function comHistorico(nome = "💧 Água") {
+    const habito = await criarHabitoNoBanco(
+      novo({ nome, config: diaria({ congelamento: { aCada: 1, max: 2 } }) }),
+    );
+    await criarRegistroNoBanco({ habitoId: habito.id, origem: "app" });
+    return habito;
+  }
+
+  it("apaga o hábito arquivado e tudo o que dependia dele", async () => {
+    const habito = await comHistorico();
+    await arquivarHabitoNoBanco(habito.id, true);
+
+    /* Antes: há o que apagar. Sem isto, o teste passaria com a cascata quebrada. */
+    for (const [tabela, coluna] of DEPENDENTES) {
+      expect(await quantas(tabela, coluna, habito.id)).toBeGreaterThan(0);
+    }
+    expect(await quantasPeloPeriodo("registro", habito.id)).toBeGreaterThan(0);
+
+    const r = await apagarHabitoNoBanco(habito.id);
+
+    expect(r.ok).toBe(true);
+    expect(await buscarHabito(habito.id)).toBeNull();
+
+    for (const [tabela, coluna] of DEPENDENTES) {
+      expect(await quantas(tabela, coluna, habito.id)).toBe(0);
+    }
+    /* Os períodos sumiram, então o join não tem por onde achar registro algum. */
+    expect(await quantasPeloPeriodo("registro", habito.id)).toBe(0);
+    expect(await db("registro").count({ c: "*" }).then(([{ c }]) => Number(c))).toBe(0);
+  });
+
+  it("recusa apagar hábito ativo — arquivar é o primeiro dos dois passos", async () => {
+    const habito = await comHistorico();
+
+    const r = await apagarHabitoNoBanco(habito.id);
+
+    expect(r).toEqual({ ok: false, falha: "habito_ativo" });
+    /* E não apagou nada: a recusa é antes do DELETE, dentro da transação. */
+    expect(await buscarHabito(habito.id)).not.toBeNull();
+    expect(await quantasPeloPeriodo("registro", habito.id)).toBe(1);
+  });
+
+  it("hábito inexistente é `nao_encontrado`, para a rota virar 404", async () => {
+    expect(await apagarHabitoNoBanco(habitoAgua.id)).toEqual({
+      ok: false,
+      falha: "nao_encontrado",
+    });
+  });
+
+  it("não encosta nos outros hábitos", async () => {
+    const vitima = await comHistorico("🚬 Parar de fumar");
+    const vizinho = await comHistorico("🏃 Correr");
+    await arquivarHabitoNoBanco(vitima.id, true);
+
+    await apagarHabitoNoBanco(vitima.id);
+
+    const sobrou = await buscarHabito(vizinho.id);
+    expect(sobrou?.sequencia.atual).toBeGreaterThan(0);
+    expect(await quantasPeloPeriodo("registro", vizinho.id)).toBe(1);
+    expect(await quantas("habito_config", "habito_id", vizinho.id)).toBe(1);
+  });
+
+  it("devolve o nome e a contagem do que foi apagado", async () => {
+    const habito = await comHistorico();
+    await criarRegistroNoBanco({ habitoId: habito.id, origem: "app" });
+    await arquivarHabitoNoBanco(habito.id, true);
+
+    const hoje = await hojeLogico();
+    const r = await apagarHabitoNoBanco(habito.id);
+
+    expect(r).toEqual({
+      ok: true,
+      dados: {
+        id: habito.id,
+        nome: "💧 Água",
+        /* Dois registros no mesmo dia lógico: 2 marcações, 1 dia. */
+        historico: { registros: 2, dias: 1, primeiroEm: hoje },
+      },
+    });
+  });
+
+  /*
+   * `notificacao_enviada` é a única dependente **sem FK**: a referência é texto
+   * (`<habito>|<dia>|<momento>`), de propósito, para não depender de ids que a
+   * materialização recria a cada escrita. Decisão registrada no fix 02: essas
+   * linhas ficam. São inertes — a chave descreve um evento que nunca mais será
+   * gerado — e apagá-las por prefixo acoplaria a exclusão ao formato da chave.
+   */
+  it("deixa as linhas de notificacao_enviada, por decisão", async () => {
+    const habito = await comHistorico();
+    await arquivarHabitoNoBanco(habito.id, true);
+
+    await db("notificacao_enviada").insert({
+      tipo: "lembrete",
+      referencia: `${habito.id}|2026-11-26|20:00:00`,
+    });
+
+    await apagarHabitoNoBanco(habito.id);
+
+    const [{ c }] = await db("notificacao_enviada").count({ c: "*" });
+    expect(Number(c)).toBe(1);
+  });
+});
+
+describe("histórico do hábito", () => {
+  it("conta marcações e dias distintos", async () => {
+    const habito = await criarHabitoNoBanco(novo({ config: diaria() }));
+    await criarRegistroNoBanco({ habitoId: habito.id, origem: "app" });
+    await criarRegistroNoBanco({ habitoId: habito.id, origem: "app" });
+
+    const hoje = await hojeLogico();
+
+    expect(await historicoDoHabitoNoBanco(habito.id)).toEqual({
+      registros: 2,
+      dias: 1,
+      primeiroEm: hoje,
+    });
+  });
+
+  it("hábito sem marcação nenhuma é zero, não null", async () => {
+    const habito = await criarHabitoNoBanco(novo({ config: diaria() }));
+
+    expect(await historicoDoHabitoNoBanco(habito.id)).toEqual({
+      registros: 0,
+      dias: 0,
+      primeiroEm: null,
+    });
+  });
+
+  it("hábito inexistente é null, para a rota virar 404", async () => {
+    expect(await historicoDoHabitoNoBanco(habitoAgua.id)).toBeNull();
   });
 });
 

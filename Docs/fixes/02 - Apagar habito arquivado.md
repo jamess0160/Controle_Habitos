@@ -1,7 +1,15 @@
 # Fix 02 — apagar um hábito arquivado
 
-**Estado:** proposto, aguardando aprovação. Nada executado.
+**Estado:** **executado** em 2026-11-27, com as decisões **A1** (só arquivado),
+**B1** (confirmação em dois toques, com os números) e **C2** (as linhas de
+`notificacao_enviada` ficam). Verificado: `tsc --noEmit`, 612 testes em 29
+arquivos, `npm run build`, `eslint`.
 **Escrito em:** 2026-11-27.
+
+> **Dois desvios do plano**, registrados nas seções correspondentes: a contagem
+> do estrago virou uma **rota de leitura própria** em vez de um campo no payload
+> de `habito` (passo 1), e o teste da cascata precisou de um hábito **com
+> congelamento** para que aquela tabela não passasse batida (seção de testes).
 
 ## O pedido
 
@@ -97,9 +105,21 @@ cascatear. E `limpar()` no tique
 4. apaga `notificacao_enviada` por prefixo (decisão C1);
 5. `DELETE FROM habito WHERE id = ?` — as cascatas fazem o resto.
 
-A contagem prévia é também o que permite a tela confirmar com números sem uma
-rota de "prévia": `GET /api/habitos/:id` já traz `sequencia`, e o que falta
-(registros e dias) cabe numa consulta.
+**Desvio:** o plano dizia que a contagem prévia dispensaria uma rota de prévia.
+Não dispensa — a confirmação precisa dos números **antes** do `DELETE`, e o
+`DELETE` é justamente o que destrói a fonte deles. As duas saídas eram engordar o
+payload de `habito` com a contagem (uma consulta a mais por hábito em toda
+abertura da lista, mais a mudança do contrato em dez fixtures) ou uma rota de
+leitura própria. Ficou a rota: `GET /api/habitos/:id/historico`, com
+`historicoDoHabito` no contrato, e o custo é pago no toque em "Apagar" em vez de
+em cada abertura da tela. `apagarHabitoNoBanco` reusa a mesma função dentro da
+transação, então o aviso de sucesso fala exatamente os números que a confirmação
+mostrou.
+
+A contagem exige join (`registro` não tem `habito_id`; o dono é o período), então
+ela carrega um tipo de linha escrito à mão — `Knex.TableType` descreve tabelas,
+não junções, e um `join` tipa como `never`. É o padrão que o projeto já usa nas
+poucas consultas com join.
 
 ### 2. Rota — `DELETE /api/habitos/:id`
 
@@ -155,6 +175,15 @@ sintético é o jeito de o hábito apagado reaparecer na tela.
 
 ## Testes
 
+**Desvio, e o teste quase nasceu cego.** A asserção que prova a cascata tem duas
+metades: antes do `DELETE`, há linhas em cada tabela dependente; depois, não há
+nenhuma. A primeira metade falhou na primeira execução, e por um motivo que
+importa: a config dos testes não tem congelamento, então `congelamento` estava
+**vazia desde o início** — a metade "depois" passaria com a cascata daquela
+tabela quebrada. O helper passou a criar o hábito com `congelamento: { aCada: 1 }`,
+que faz a primeira marcação já render um congelamento ganho. A lição é a
+pré-asserção: sem ela, um teste de exclusão é verde por vacuidade.
+
 Novos, em [`servidor/habitos.test.ts`](../../servidor/habitos.test.ts):
 
 - apaga um hábito arquivado e **as seis tabelas dependentes ficam sem rastro**
@@ -179,15 +208,26 @@ não existe arquivo de teste para esta tela hoje): o cartão ativo **não** ofer
 
 ## Verificação
 
-1. `npx tsc --noEmit`;
-2. `npm test` com o `db:up` de pé;
-3. `npm run build`;
-4. `npm run lint`;
-5. à mão: criar um hábito, marcar duas vezes, arquivar, apagar, e confirmar que
-   ele sai da lista, que o painel de hoje não o mostra, e que os outros hábitos
-   seguem com sequência e histórico;
-6. no banco, depois do passo 5: `SELECT count(*) FROM registro` e
-   `notificacao_enviada` para ver que sobrou só o que é dos outros hábitos.
+Feito:
+
+1. `npx tsc --noEmit` — limpo. A rota nova precisou de um `npm run build` antes:
+   os tipos de `RouteContext<"/api/habitos/[id]/historico">` são **gerados**, e
+   até o build existir o `tsc` reclama de uma rota que está correta.
+2. `npm test` — **612 passando em 29 arquivos** (eram 592 em 28). O arquivo novo
+   é `componentes/tela-habitos.test.tsx`, que não existia.
+3. `npm run build` — passa, e a rota `/api/habitos/[id]/historico` aparece no
+   inventário.
+4. `npm run lint` — limpo.
+
+Falta você conferir no navegador: arquivar um hábito, tocar em **Apagar**, ver os
+números do histórico na confirmação, cancelar, apagar de verdade, e confirmar que
+ele sai da lista e do painel de hoje enquanto os outros seguem intactos.
+
+Um achado do teste de tela que vale saber: um `<details>` **fechado** continua
+tendo os filhos no DOM — ele esconde por apresentação, não por montagem. Procurar
+"Apagar" no documento inteiro acha o botão do arquivado e não diz nada sobre o
+cartão ativo, então a asserção de "a ação não existe no ativo" tem de ser escopada
+ao `<li>` do cartão.
 
 ## Risco residual
 

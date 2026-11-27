@@ -73,10 +73,14 @@ Identidade do hábito. Separado da configuração porque a configuração é ver
 | `ordem` | int NOT NULL | posição no dashboard; semeada pela ordem de criação, editável por arraste |
 | `pausado_de` | date NULL | |
 | `pausado_ate` | date NULL | NULL com `pausado_de` preenchido = pausa aberta |
-| `arquivado_em` | timestamptz NULL | soft delete; preserva histórico. Não há exclusão |
+| `arquivado_em` | timestamptz NULL | soft delete; preserva histórico. É pré-requisito para apagar |
 | `criado_em` | timestamptz NOT NULL | |
 
 A ordenação padrão é `criado_em`, e `ordem` nasce com esse mesmo sequenciamento — reordenar manualmente só reescreve `ordem` numa transação. Com a quantidade de hábitos de uso pessoal, renumerar inteiros é mais simples que posições fracionárias.
+
+> **`DELETE FROM habito` é a única operação destrutiva do domínio**, e só vale para hábito já arquivado. Ela leva por `ON DELETE CASCADE` tudo o que depende do hábito: `habito_config`, `habito_periodo`, `habito_ocorrencia`, `registro`, `congelamento` e `habito_streak` — não há nada a apagar à mão, e `servidor/habitos.test.ts` afirma as seis para que uma migration que troque um `CASCADE` por `RESTRICT` apareça como teste vermelho e não como erro de FK em produção.
+>
+> **`notificacao_enviada` é a exceção, de propósito.** A `referencia` dela é texto (`<habito>|<dia>|<momento>`) para não depender de ids que a materialização recria a cada escrita, então não existe FK para cascatear — e `limpar()` do tique não poda essa tabela. As linhas do hábito apagado **ficam**: são inertes, porque a chave descreve um evento que nunca mais será gerado, e apagá-las por prefixo acoplaria a exclusão ao formato da chave. Decisão registrada em [Docs/fixes/02](../fixes/02%20-%20Apagar%20habito%20arquivado.md).
 
 ### `habito_config`
 

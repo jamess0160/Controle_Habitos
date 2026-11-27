@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 import { enviar, useRecurso, type Falha } from "@/cliente/api";
 import { dataCurta, dataDeHojeNoAparelho } from "@/cliente/formato";
-import type { Habito, ListaDeHabitos } from "@/contracts";
+import type { HabitoApagado, Habito, HistoricoDoHabito, ListaDeHabitos } from "@/contracts";
 import { CLASSE_COR } from "./cor";
 import { Carregando, Erro } from "./estado-da-tela";
 import { Mais } from "./icones";
@@ -17,7 +17,9 @@ import { Botao, Campo, classeDeBotao, CLASSE_ENTRADA, Nota } from "./ui";
  *
  * Todos os ativos com nome (emoji incluso), cor, o resumo da cadência em
  * linguagem natural, sequência e estoque de congelamento. Arquivados ficam numa
- * seção recolhida no fim — não há exclusão permanente neste app.
+ * seção recolhida no fim, e é **só** lá que a exclusão aparece: apagar exige
+ * arquivar primeiro, para a única ação irreversível do app não ficar a um toque
+ * de distância. Ver `PainelDeExclusao`.
  *
  * A ordem é a de `habito.ordem`, a mesma do dashboard, e o arraste a persiste por
  * `PUT /api/habitos/ordem`.
@@ -37,11 +39,27 @@ import { Botao, Campo, classeDeBotao, CLASSE_ENTRADA, Nota } from "./ui";
  * As quatro ações por linha devolvem o **hábito**, não `ok: true` — é o que
  * permite redesenhar só aquela linha em vez de recarregar a lista. Pausa e
  * arquivamento foram escritos assim no contrato exatamente por isso.
+ *
+ * Apagar é a exceção, e tem de ser: não há hábito para devolver. Ele devolve o
+ * que foi destruído (`habitoApagado`) e a tela remove o id das duas listas.
  */
+
+/**
+ * `3 marcações` / `1 marcação`.
+ *
+ * Local, e não o `plural()` de `contracts/resumo.ts`: aquele é privado do módulo
+ * da frase da regra, e exportá-lo misturaria vocabulário de contrato com texto
+ * de tela.
+ */
+function contagem(n: number, singular: string, plural: string): string {
+  return `${n} ${n === 1 ? singular : plural}`;
+}
 
 export function TelaHabitos() {
   const { recurso, recarregar, definir } = useRecurso<ListaDeHabitos>("/api/habitos");
   const [falha, setFalha] = useState<Falha | null>(null);
+  /** Só a exclusão produz aviso: é a única ação cujo efeito não se vê na lista. */
+  const [aviso, setAviso] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
 
   if (recurso.estado === "carregando") {
@@ -113,6 +131,7 @@ export function TelaHabitos() {
 
   async function agir(url: string, metodo: string, corpo?: unknown) {
     setFalha(null);
+    setAviso(null);
     setOcupado(true);
 
     const r = await enviar<Habito>(url, metodo, corpo);
@@ -125,6 +144,42 @@ export function TelaHabitos() {
     }
 
     aplicar(r.dados);
+  }
+
+  /**
+   * Apagar não passa por `agir`.
+   *
+   * As outras quatro ações devolvem o **hábito** e `aplicar()` o recoloca na
+   * lista certa pelo `arquivadoEm` que voltou. Aqui não volta hábito nenhum —
+   * ele deixou de existir —, então o caminho é remover o id das duas listas.
+   * Reaproveitar `aplicar` com um objeto sintético seria o jeito de o hábito
+   * apagado reaparecer na tela.
+   *
+   * O aviso de sucesso repete os números que a confirmação mostrou: é a única
+   * ação sem volta do app, e ver o que foi destruído fecha o ciclo.
+   */
+  async function apagar(habito: Habito) {
+    setFalha(null);
+    setAviso(null);
+    setOcupado(true);
+
+    const r = await enviar<HabitoApagado>(`/api/habitos/${habito.id}`, "DELETE");
+
+    setOcupado(false);
+
+    if (!r.ok) {
+      setFalha(r.falha);
+      return;
+    }
+
+    definir({
+      habitos: lista.habitos.filter((h) => h.id !== r.dados.id),
+      arquivados: lista.arquivados.filter((h) => h.id !== r.dados.id),
+    });
+
+    setAviso(
+      `${r.dados.nome} foi apagado, com ${contagem(r.dados.historico.registros, "marcação", "marcações")}.`,
+    );
   }
 
   return (
@@ -151,6 +206,12 @@ export function TelaHabitos() {
         </p>
       )}
 
+      {aviso !== null && (
+        <p role="status" className="text-sm text-texto-fraco">
+          {aviso}
+        </p>
+      )}
+
       {lista.habitos.length === 0 ? (
         <Nota tom="forte">
           Nenhum hábito ativo. Crie o primeiro em <strong className="text-texto">Novo</strong> — ou
@@ -173,7 +234,13 @@ export function TelaHabitos() {
           </summary>
           <ul className="flex flex-col gap-2 border-t border-linha p-2">
             {lista.arquivados.map((habito) => (
-              <CartaoDeHabito key={habito.id} habito={habito} ocupado={ocupado} aoAgir={agir} />
+              <CartaoDeHabito
+                key={habito.id}
+                habito={habito}
+                ocupado={ocupado}
+                aoAgir={agir}
+                aoApagar={() => void apagar(habito)}
+              />
             ))}
           </ul>
         </details>
@@ -369,6 +436,7 @@ function CartaoDeHabito({
   habito,
   ocupado,
   aoAgir,
+  aoApagar,
   alca,
   arrastando = false,
   aoRegistrarElemento,
@@ -376,12 +444,15 @@ function CartaoDeHabito({
   readonly habito: Habito;
   readonly ocupado: boolean;
   readonly aoAgir: (url: string, metodo: string, corpo?: unknown) => void;
+  /** Só nos arquivados: apagar exige arquivar primeiro, e o cartão ativo não oferece. */
+  readonly aoApagar?: () => void;
   /** Ausente nos arquivados: ordem de arquivado não é ordem de nada. */
   readonly alca?: React.ReactNode;
   readonly arrastando?: boolean;
   readonly aoRegistrarElemento?: (elemento: HTMLLIElement | null) => void;
 }) {
   const [pausando, setPausando] = useState(false);
+  const [apagando, setApagando] = useState(false);
   const arquivado = habito.arquivadoEm !== null;
   const pausado = habito.pausa !== null;
 
@@ -422,14 +493,34 @@ function CartaoDeHabito({
               aoAgir(`/api/habitos/${habito.id}/pausa`, "POST", corpo);
             }}
           />
+        ) : apagando && aoApagar !== undefined ? (
+          <PainelDeExclusao
+            habito={habito}
+            ocupado={ocupado}
+            aoCancelar={() => setApagando(false)}
+            aoConfirmar={() => {
+              setApagando(false);
+              aoApagar();
+            }}
+          />
         ) : (
           <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs">
             {arquivado ? (
-              <AcaoDeLinha
-                rotulo="Desarquivar"
-                ocupado={ocupado}
-                aoClicar={() => aoAgir(`/api/habitos/${habito.id}/arquivo`, "DELETE")}
-              />
+              <>
+                <AcaoDeLinha
+                  rotulo="Desarquivar"
+                  ocupado={ocupado}
+                  aoClicar={() => aoAgir(`/api/habitos/${habito.id}/arquivo`, "DELETE")}
+                />
+                {aoApagar !== undefined && (
+                  <AcaoDeLinha
+                    rotulo="Apagar"
+                    destrutivo
+                    ocupado={ocupado}
+                    aoClicar={() => setApagando(true)}
+                  />
+                )}
+              </>
             ) : (
               <>
                 <Link href={`/habitos/${habito.id}/editar`} className="min-h-11 py-3 font-medium">
@@ -471,10 +562,13 @@ function CartaoDeHabito({
 function AcaoDeLinha({
   rotulo,
   ocupado,
+  destrutivo = false,
   aoClicar,
 }: {
   readonly rotulo: string;
   readonly ocupado: boolean;
+  /** Pinta o rótulo de vermelho. Só "Apagar" usa: é a única ação sem volta. */
+  readonly destrutivo?: boolean;
   readonly aoClicar: () => void;
 }) {
   return (
@@ -482,10 +576,92 @@ function AcaoDeLinha({
       type="button"
       disabled={ocupado}
       onClick={aoClicar}
-      className="min-h-11 py-3 font-medium text-texto-fraco disabled:opacity-50"
+      className={`min-h-11 py-3 font-medium disabled:opacity-50 ${
+        destrutivo ? "text-habito-vermelho" : "text-texto-fraco"
+      }`}
     >
       {rotulo}
     </button>
+  );
+}
+
+/**
+ * A confirmação de apagar, com o estrago em números.
+ *
+ * Dois toques, e o segundo é um botão destrutivo: apagar é a **única** operação
+ * irreversível do app. Todo o resto é replay — editar, pausar, arquivar e
+ * desmarcar recalculam a partir de `habito_config`, `registro` e a pausa —, e
+ * daqui a volta é só a restauração do `pg_dump`, isto é, perder o que foi
+ * registrado desde o backup da noite.
+ *
+ * Os números vêm de `GET /api/habitos/:id/historico` no momento do primeiro
+ * toque, e não do payload da lista: a contagem exige um join e pagá-la em toda
+ * abertura da tela seria caro para um dado usado aqui. Enquanto carrega, o botão
+ * de confirmar **não** aparece — "tem certeza?" sem o número é a mesma pergunta
+ * vazia que isto existe para não fazer.
+ *
+ * Se a contagem falhar, apagar continua possível: o número é informação, não
+ * autorização. Mas a tela diz que não sabe, em vez de fingir um zero.
+ */
+function PainelDeExclusao({
+  habito,
+  ocupado,
+  aoCancelar,
+  aoConfirmar,
+}: {
+  readonly habito: Habito;
+  readonly ocupado: boolean;
+  readonly aoCancelar: () => void;
+  readonly aoConfirmar: () => void;
+}) {
+  const { recurso } = useRecurso<HistoricoDoHabito>(`/api/habitos/${habito.id}/historico`);
+
+  return (
+    <div className="mt-3 flex flex-col gap-3 border-t border-linha pt-3">
+      <p className="text-sm">
+        Apagar <strong className="font-medium">{habito.nome}</strong>?
+      </p>
+
+      {recurso.estado === "carregando" && (
+        <p className="text-xs text-texto-fraco">Contando o histórico…</p>
+      )}
+
+      {recurso.estado === "erro" && (
+        <p className="text-xs text-texto-fraco">
+          Não foi possível contar o histórico deste hábito — então não sei dizer quanto se perde.
+          Apagar continua sem volta.
+        </p>
+      )}
+
+      {recurso.estado === "pronto" && (
+        <p className="text-xs leading-snug text-texto-fraco">
+          {recurso.dados.registros === 0
+            ? "Este hábito não tem nenhuma marcação."
+            : `Isto apaga ${contagem(recurso.dados.registros, "marcação", "marcações")} em ${contagem(recurso.dados.dias, "dia", "dias")}`}
+          {recurso.dados.registros > 0 && recurso.dados.primeiroEm !== null
+            ? `, desde ${dataCurta(recurso.dados.primeiroEm)}.`
+            : recurso.dados.registros > 0
+              ? "."
+              : ""}
+          {habito.sequencia.recorde > 0 &&
+            ` A sequência recorde de ${habito.sequencia.recorde} vai com ele.`}
+          {" Não há como desfazer: só a restauração do backup."}
+        </p>
+      )}
+
+      <div className="flex gap-2">
+        <Botao
+          variante="destrutivo"
+          disabled={ocupado || recurso.estado === "carregando"}
+          onClick={aoConfirmar}
+        >
+          Apagar para sempre
+        </Botao>
+        <Botao variante="fantasma" onClick={aoCancelar}>
+          Cancelar
+        </Botao>
+      </div>
+    </div>
   );
 }
 

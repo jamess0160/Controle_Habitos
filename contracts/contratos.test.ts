@@ -2,7 +2,14 @@ import { estadoAuth, loginComSenha, passkeyCadastrada, resetarBiometria } from "
 import { dataLogica, horario } from "./comum";
 import { caminhoDe, exigirValido, validar } from "./erro";
 import * as f from "./fixtures";
-import { configHabito, criarHabito, editarHabito, listaDeHabitos } from "./habito";
+import {
+  configHabito,
+  criarHabito,
+  editarHabito,
+  habitoApagado,
+  historicoDoHabito,
+  listaDeHabitos,
+} from "./habito";
 import { hoje } from "./hoje";
 import { configApp, exportacao, statusPush } from "./infra";
 import { resumoDeConfig, textoDeCongelamento } from "./resumo";
@@ -24,6 +31,8 @@ describe("fixtures validam contra o próprio schema", () => {
     ["hábito flexível quantificado", configHabito, f.habitoAgua.config],
     ["hábito fixo semanal", configHabito, f.habitoVitamina.config],
     ["hábito negativo mensal", configHabito, f.habitoArquivado.config],
+    ["histórico do hábito", historicoDoHabito, f.historicoDoHabitoFixture],
+    ["hábito apagado", habitoApagado, f.habitoApagadoFixture],
     ["registro criado", registroCriado, f.registroCriadoFixture],
     ["retroativo", retroativo, f.retroativoFixture],
     ["retroativo (prévia)", retroativoAplicado, f.retroativoPreviaFixture],

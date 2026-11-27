@@ -3,6 +3,8 @@ import type {
   ConfigHabito,
   CriarHabito,
   Habito,
+  HabitoApagado,
+  HistoricoDoHabito,
   ListaDeHabitos,
   PausarHabito,
 } from "@/contracts";
@@ -340,6 +342,102 @@ export async function arquivarHabitoNoBanco(
     await trx("habito")
       .where({ id: habitoId })
       .update({ arquivado_em: null, ordem: Number(proxima) });
+  });
+}
+
+/**
+ * O que a exclusão pode responder.
+ *
+ * `habito_ativo` é falha de **regra**, não 404: o hábito existe, e quem chamou
+ * precisa ouvir "arquive primeiro" em vez de "não encontrado". Fica aqui, e não
+ * na união de `FalhaDeRegistro`, porque aquela descreve marcação — misturar as
+ * duas faria o `switch` de mensagens de registro ganhar casos que nunca
+ * acontecem ali.
+ */
+export type FalhaDeExclusao = "nao_encontrado" | "habito_ativo";
+export type ResultadoDaExclusao =
+  | { ok: true; dados: HabitoApagado }
+  | { ok: false; falha: FalhaDeExclusao };
+
+/**
+ * Quantas marcações e quantos dias um hábito tem — o tamanho do estrago de
+ * apagá-lo.
+ *
+ * `registro` não guarda `habito_id`: o dono do registro é o **período**, que
+ * aponta para o hábito. Daí o join, e daí o tipo de linha escrito à mão —
+ * `Knex.TableType` descreve tabelas, não junções, e um `join` tipa como `never`.
+ *
+ * Uma consulta só, com os três números: dois `count` e um `min` sobre o mesmo
+ * conjunto de linhas custam o mesmo scan, e três consultas poderiam divergir se
+ * algo escrevesse entre elas.
+ */
+export async function historicoDoHabitoNoBanco(
+  habitoId: string,
+  conexao: Knex = db,
+): Promise<HistoricoDoHabito | null> {
+  const existe = await conexao("habito").where({ id: habitoId }).first("id");
+  if (existe === undefined) return null;
+
+  const linha = (await conexao("registro")
+    .join("habito_periodo", "habito_periodo.id", "registro.periodo_id")
+    .where("habito_periodo.habito_id", habitoId)
+    .first(
+      conexao.raw("count(registro.id) AS registros"),
+      conexao.raw("count(DISTINCT registro.data_logica) AS dias"),
+      conexao.raw("min(registro.data_logica) AS primeiro_em"),
+    )) as unknown as
+    | { registros: string | number; dias: string | number; primeiro_em: string | null }
+    | undefined;
+
+  return {
+    registros: Number(linha?.registros ?? 0),
+    dias: Number(linha?.dias ?? 0),
+    primeiroEm: linha?.primeiro_em ?? null,
+  };
+}
+
+/**
+ * Apaga o hábito **de verdade**, com todo o histórico dele.
+ *
+ * A única operação irreversível do app. Todo o resto é replay — a entrada é
+ * `habito_config`, `registro` e a pausa, e qualquer estado derivado é
+ * recalculável —, mas daqui não há volta: só a restauração do `pg_dump` de
+ * `infra/backup.sh`, ou seja, perder o que foi registrado desde o último backup.
+ *
+ * **Só hábito arquivado.** Arquivar já existe, é reversível e vira o primeiro de
+ * dois passos: a ação destrutiva nunca fica a um toque de distância, que é o
+ * mesmo desenho das CLIs de reset. A recusa é `regra_violada` e não 404 — o
+ * hábito existe, e a tela precisa poder dizer "arquive primeiro".
+ *
+ * **Não há `materializar` aqui**, e é a única escrita de hábito sem ele: não
+ * sobrou nada para materializar. As dependentes caem por `ON DELETE CASCADE`
+ * até `habito` — `habito_config`, `habito_periodo`, `habito_ocorrencia`,
+ * `registro`, `congelamento` e `habito_streak`.
+ *
+ * A exceção é **`notificacao_enviada`**, que guarda `referencia` em texto
+ * (`<habito>|<dia>|<momento>`) justamente para não depender de ids que a
+ * materialização recria — então não há FK para cascatear, e `limpar()` do tique
+ * não poda essa tabela. As linhas do hábito apagado ficam, por decisão: são
+ * inertes, porque a chave descreve um evento que nunca mais será gerado, e
+ * apagá-las por prefixo acoplaria a exclusão ao formato da chave.
+ *
+ * O histórico é contado **antes** do `DELETE` porque depois não há o que contar,
+ * e é ele que a resposta devolve: a tela mostrou aqueles números na confirmação
+ * e repete os mesmos no aviso de sucesso.
+ */
+export async function apagarHabitoNoBanco(habitoId: string): Promise<ResultadoDaExclusao> {
+  return db.transaction(async (trx) => {
+    const linha = await trx("habito").where({ id: habitoId }).first("id", "nome", "arquivado_em");
+    if (linha === undefined) return { ok: false, falha: "nao_encontrado" };
+
+    if (linha.arquivado_em === null) return { ok: false, falha: "habito_ativo" };
+
+    const historico = await historicoDoHabitoNoBanco(habitoId, trx);
+    if (historico === null) return { ok: false, falha: "nao_encontrado" };
+
+    await trx("habito").where({ id: habitoId }).delete();
+
+    return { ok: true, dados: { id: linha.id, nome: linha.nome, historico } };
   });
 }
 

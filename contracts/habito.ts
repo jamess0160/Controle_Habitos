@@ -296,3 +296,41 @@ export const listaDeHabitos = z.object({
   arquivados: z.array(habito),
 });
 export type ListaDeHabitos = z.infer<typeof listaDeHabitos>;
+
+/**
+ * `GET /api/habitos/:id/historico` — o tamanho do estrago de apagar.
+ *
+ * Existe para a confirmação da exclusão poder dizer **em números** o que vai
+ * embora, e não um "tem certeza?" genérico. Apagar é a única operação
+ * irreversível do app (o resto é replay), então a tela tem de mostrar o que a
+ * pessoa está destruindo antes de ela decidir.
+ *
+ * Rota própria em vez de campo no payload de `habito`: a contagem exige um join
+ * de `registro` com `habito_periodo` (registro não guarda `habito_id`), e
+ * pagá-la em toda abertura da lista para um dado usado só na exclusão seria
+ * caro no lugar errado. Aqui ela custa um toque explícito.
+ */
+export const historicoDoHabito = z.object({
+  /** Marcações, somando todos os períodos — não só as que contaram no prazo. */
+  registros: z.int().min(0),
+  /** Dias lógicos distintos com ao menos uma marcação. */
+  dias: z.int().min(0),
+  /** O primeiro dia marcado, ou `null` num hábito sem nenhuma marcação. */
+  primeiroEm: dataLogica.nullable(),
+});
+export type HistoricoDoHabito = z.infer<typeof historicoDoHabito>;
+
+/**
+ * `DELETE /api/habitos/:id` — a exclusão definitiva.
+ *
+ * Devolve corpo, e não um 204, porque `chamar()` em `cliente/api.ts` faz
+ * `resposta.json()` sempre: um 204 chega à tela como `{ ok: true, dados: null }`
+ * com `dados` tipado como se houvesse objeto. E o `historico` aqui é o mesmo que
+ * a confirmação mostrou, então o aviso de sucesso fala os mesmos números.
+ */
+export const habitoApagado = z.object({
+  id: uuid,
+  nome: z.string(),
+  historico: historicoDoHabito,
+});
+export type HabitoApagado = z.infer<typeof habitoApagado>;

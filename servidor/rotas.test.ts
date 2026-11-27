@@ -45,6 +45,8 @@ import {
   exigirValido,
   exportacao,
   habito,
+  habitoApagado,
+  historicoDoHabito,
   hoje,
   listaDeHabitos,
   retroativo,
@@ -72,7 +74,12 @@ import { GET as configGet, PATCH as configPatch } from "@/app/api/config/route";
 import { GET as exportar } from "@/app/api/exportar/route";
 import { GET as habitosGet, POST as habitosPost } from "@/app/api/habitos/route";
 import { PUT as habitosOrdem } from "@/app/api/habitos/ordem/route";
-import { GET as habitoGet, PATCH as habitoPatch } from "@/app/api/habitos/[id]/route";
+import {
+  DELETE as habitoDelete,
+  GET as habitoGet,
+  PATCH as habitoPatch,
+} from "@/app/api/habitos/[id]/route";
+import { GET as historicoGet } from "@/app/api/habitos/[id]/historico/route";
 import { POST as pausaPost } from "@/app/api/habitos/[id]/pausa/route";
 import { POST as arquivoPost } from "@/app/api/habitos/[id]/arquivo/route";
 import {
@@ -304,6 +311,24 @@ describe("todo stub responde o que o contrato promete", () => {
       async (id) => pausaPost(post({ de: await hojeDeTeste(), ate: null }), ctxDe(id)),
     ],
     ["POST /api/habitos/:id/arquivo", habito, (id) => arquivoPost(post({}), ctxDe(id))],
+    [
+      "GET /api/habitos/:id/historico",
+      historicoDoHabito,
+      (id) => historicoGet(post({}), ctxDe(id)),
+    ],
+    [
+      "DELETE /api/habitos/:id",
+      habitoApagado,
+      /*
+       * Arquiva antes, porque a exclusão só aceita hábito arquivado — os dois
+       * passos são a proteção, não um detalhe do teste. O caso de recusa do
+       * hábito ativo está em [habitos.test.ts](habitos.test.ts).
+       */
+      async (id) => {
+        await arquivoPost(post({}), ctxDe(id));
+        return habitoDelete(post({}), ctxDe(id));
+      },
+    ],
     ["GET /api/habitos/:id/retroativo", retroativo, (id) => retroativoGet(post({}), ctxDe(id))],
     [
       "POST /api/habitos/:id/retroativo",

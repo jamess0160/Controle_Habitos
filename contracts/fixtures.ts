@@ -5,7 +5,7 @@ import type {
   OpcoesWebauthn,
   PasskeyCadastrada,
 } from "./auth";
-import type { Habito, ListaDeHabitos } from "./habito";
+import type { Habito, HabitoApagado, HistoricoDoHabito, ListaDeHabitos } from "./habito";
 import type { Hoje } from "./hoje";
 import type { ConfigApp, Exportacao, StatusPush } from "./infra";
 import type {
@@ -579,4 +579,24 @@ export const registroRemovidoFixture: RegistroRemovido = {
     periodoStatus: "aberto",
     novoVencimento: null,
   },
+};
+
+/**
+ * `GET /api/habitos/:id/historico` — o estrago que a confirmação de apagar mostra.
+ *
+ * Os números são do `habitoArquivado`: 3 meses de hábito negativo com 2 recaídas
+ * registradas, que é o caso real em que apagar faz sentido — um hábito que saiu
+ * de cena e cujo histórico não interessa mais.
+ */
+export const historicoDoHabitoFixture: HistoricoDoHabito = {
+  registros: 2,
+  dias: 2,
+  primeiroEm: "2026-09-14",
+};
+
+/** `DELETE /api/habitos/:id` — devolve o mesmo histórico que a tela já mostrou. */
+export const habitoApagadoFixture: HabitoApagado = {
+  id: habitoArquivado.id,
+  nome: habitoArquivado.nome,
+  historico: historicoDoHabitoFixture,
 };

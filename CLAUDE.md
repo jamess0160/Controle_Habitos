@@ -76,7 +76,7 @@ The domain rules are non-trivial and were decided deliberately; [Docs/mapas/](Do
 - **[Mapa de telas.md](Docs/mapas/Mapa%20de%20telas.md)** — screens, flows, per-type interactions, and the wave 1 / wave 2 split.
 - **[Mapa de autenticação.md](Docs/mapas/Mapa%20de%20autentica%C3%A7%C3%A3o.md)** — WebAuthn flows, the reset CLI, rate limiting, and the accepted limits.
 
-Each map ends with a "Pendências" section listing what is still undecided — check it before inventing an answer to one of those questions. **[Docs/Roadmap onda 1.md](Docs/Roadmap%20onda%201.md)** has the execution order, per-stage exit criteria, the API route inventory, and the known risks. **[Docs/Deploy.md](Docs/Deploy.md)** is the server runbook — what comes up, the variables, first access, the reset CLIs inside the container, the verified backup and the restore. Any change to the Dockerfile, the compose file or `infra/` has to show up there.
+Each map ends with a "Pendências" section listing what is still undecided — check it before inventing an answer to one of those questions. **[Docs/Roadmap onda 1.md](Docs/Roadmap%20onda%201.md)** has the execution order, per-stage exit criteria, the API route inventory, and the known risks. **[Docs/Deploy.md](Docs/Deploy.md)** is the server runbook — it opens with a table of contents; what comes up, the variables, first access, the reset CLIs inside the container, **updating a running install**, the verified backup and the restore. Any change to the Dockerfile, the compose file or `infra/` has to show up there.
 
 Four traps worth stating up front:
 

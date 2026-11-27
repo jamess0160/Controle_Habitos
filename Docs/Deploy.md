@@ -6,6 +6,21 @@ este documento bastar: uma máquina limpa, só o que está escrito aqui.
 
 O comportamento do app está nos [mapas](mapas/); aqui está só a operação.
 
+## Sumário
+
+| Seção | Quando se lê |
+|---|---|
+| [O que sobe](#o-que-sobe) | para entender o desenho antes de mexer: quatro serviços, e por que o túnel e o nginx **não** estão entre eles |
+| [Antes: três coisas que não dão para desfazer](#antes-três-coisas-que-não-dão-para-desfazer) | uma vez, antes da primeira subida. São as decisões que um deploy distraído não desfaz |
+| [No host](#no-host) | o que a máquina precisa ter |
+| [Subida do zero](#subida-do-zero) | máquina limpa, oito passos até a notificação chegando no celular |
+| [As variáveis](#as-variáveis) | ao escrever o `.env`, e sempre que uma versão nova pedir variável nova |
+| [Operação](#operação) | o dia a dia: logs, as CLIs de reset, tique à mão, trocar VAPID ou domínio |
+| [Atualização](#atualização) | **subir uma versão nova no que já está rodando** — o procedimento, a conferência, e como voltar atrás |
+| [Backup](#backup) | o `pg_dump` verificado e a crontab |
+| [Restauração](#restauração) | quando o banco precisa voltar, e a restauração de teste que fecha a etapa 5 |
+| [Quando algo não sobe](#quando-algo-não-sobe) | a tabela de sintoma → causa provável. É o primeiro lugar a olhar |
+
 ---
 
 ## O que sobe
@@ -278,7 +293,7 @@ Confira:
 
 ```bash
 docker compose ps                    # app healthy, worker up, migrate exited (0)
-docker compose logs migrate          # as 9 migrations e os seeds
+docker compose logs migrate          # as 10 migrations e os seeds
 docker compose logs -f app worker
 ```
 
@@ -388,17 +403,7 @@ sudo tail -f /var/log/nginx/error.log      # "connect() failed" = upstream caíd
 O worker só escreve linha quando acontece algo — ele roda 1440 vezes por dia, e um
 log por tique enterraria o que importa.
 
-### Atualizar para uma versão nova
-
-```bash
-cd /opt/controle-habito
-./infra/backup.sh                  # antes, sempre: migration aqui não tem rollback automático
-git pull
-docker compose up -d --build
-```
-
-O `migrate` roda de novo e aplica o que falta antes de app e worker voltarem. O
-volume do Postgres não é tocado.
+Subir uma versão nova tem seção própria: [Atualização](#atualização).
 
 ### As CLIs de reset
 
@@ -463,6 +468,164 @@ como migrá-la.
    velha e devolve uma senha provisória;
 6. `docker compose up -d`, entre pelo domínio novo com a provisória e cadastre a
    passkey outra vez.
+
+---
+
+## Atualização
+
+Subir uma versão nova no que já está rodando. É um procedimento diferente da
+[subida do zero](#subida-do-zero): aqui existe um banco com histórico, uma passkey
+gravada num celular, e nenhum dos dois pode ser arrastado pela mudança.
+
+### Antes
+
+```bash
+cd /opt/controle-habito
+./infra/backup.sh
+```
+
+**O backup não é cortesia, é a única volta.** Migration não tem rollback
+automático nesta pilha, e vários `down` são **lossy por construção** — a `0009`
+converteu minutos em segundos e a volta arredonda para cima; a `0010` normalizou
+a meta da cadência diária e a volta não restaura o valor antigo. Reverter o
+schema devolve as colunas, **não** os dados. Quem devolve dado é
+[Restauração](#restauração).
+
+Se a versão nova pedir variável nova, ela entra no `.env` **antes** do build — e
+a hora em que a falta aparece depende de quem lê a variável:
+
+- **o compose** interrompe na hora, porque as obrigatórias usam `:?` (é o caso de
+  `POSTGRES_PASSWORD`). Falha alta e barata;
+- **o app**, que lê no momento da requisição, sobe saudável e só falha quando
+  alguém toca a rota que precisa dela. Essa é a que morde: o `docker compose ps`
+  diz que está tudo bem.
+
+A lista está em [As variáveis](#as-variáveis), e `.env.producao.example` é a
+referência do que deveria existir.
+
+E vale olhar o que a migration vai fazer, antes de ela rodar:
+
+```bash
+git fetch && git log --oneline HEAD..@{u}        # o que vem
+git diff --stat HEAD..@{u} -- db/migrations      # se vem migration
+docker compose run --rm worker tsx db/cli.ts status
+```
+
+### O procedimento
+
+```bash
+git pull
+docker compose up -d --build
+docker compose ps
+```
+
+O que acontece nessa ordem, e por que basta um comando:
+
+1. as duas imagens são reconstruídas — `app` (standalone do Next) e `worker`
+   (TypeScript cru sob `tsx`), do mesmo Dockerfile;
+2. o serviço **`migrate` roda até o fim antes de app e worker voltarem**, porque
+   os dois têm `service_completed_successfully` nele. Ninguém sobe sobre schema
+   velho, e não há duas instâncias disputando a trava do Knex;
+3. `migrate` também roda o seed — que nesta pilha é só `config_app` e a senha do
+   primeiro acesso, ambos com `ON CONFLICT DO NOTHING`. Ele **nunca** sobrescreve
+   `rp_id` nem o par VAPID, que é o que faz a passkey do celular sobreviver a um
+   deploy distraído;
+4. app e worker reiniciam com as imagens novas. O **volume do Postgres não é
+   tocado**.
+
+Duas coisas que parecem problema e não são:
+
+- **o comando demora no worker.** O `stop_grace_period` dele é de 90 s: o SIGTERM
+  marca o laço para parar **depois** do tique em curso, porque matar no meio de
+  uma materialização é o que a transação protege mas o processo precisa do tempo
+  de terminá-la;
+- **alguns segundos de `502` no domínio**, enquanto o contêiner do `app` reinicia
+  e o healthcheck volta a passar. O nginx do host não tem o que fazer nesse
+  intervalo, e não há nada a configurar: um app só, um usuário só.
+
+**Nada a fazer no celular.** O service worker é pass-through com `skipWaiting` —
+ele não guarda cache de nada ([public/sw.js](../public/sw.js)), existe para a PWA
+ser instalável e para o push. Então não há versão velha presa no aparelho: a
+próxima abertura já é a nova. O que **quebra** a PWA é `/sw.js` dar 404, e isso é
+`habitos.conf` com `root`/`alias`/`try_files` — ver
+[Quando algo não sobe](#quando-algo-não-sobe).
+
+### Quando a migration falha
+
+Vale saber antes de acontecer, porque o `migrate` é a **porta** de app e worker:
+os dois dependem dele com `service_completed_successfully`, então uma migration
+que estoura aborta o `up` e as imagens novas não entram em serviço.
+
+```bash
+docker compose logs migrate      # o erro, e em qual migration parou
+docker compose ps                # quem ficou de pé, e quem não
+```
+
+O que **não** acontece: schema pela metade. As migrations rodam cada uma em sua
+transação (o padrão do Knex, e o `knexfile` não desliga), então a que falha se
+desfaz sozinha e o lote simplesmente para ali — `db/cli.ts status` mostra
+exatamente onde.
+
+O que **pode** acontecer é o app ficar fora do ar, e não há como prever se o
+contêiner antigo ainda está rodando quando o `up` aborta: isso depende de até onde
+o compose chegou antes de parar. Por isso a conferência é `docker compose ps`, e
+não suposição. Corrigida a causa, `docker compose up -d --build` de novo retoma do
+ponto em que parou.
+
+### A conferência
+
+```bash
+docker compose ps                                        # app healthy, migrate Exited (0)
+docker compose run --rm worker tsx db/cli.ts status      # pendentes (0)
+curl -s http://127.0.0.1:3000/api/auth/estado        # a porta do HABITO_PORTA_LOCAL
+docker compose logs --since 10m app
+```
+
+No `curl`, duas coisas de uma vez: se ele responde JSON, o app está de pé **e**
+falando com o banco (é a rota do healthcheck). E
+`"modoDesenvolvimento": false` é a confirmação de que o `APP_MODO` do servidor
+continua `producao` — um `.env` que perdeu a variável abre uma porta a mais, em
+silêncio, e este é o lugar onde isso aparece.
+
+Depois, pelo domínio, no celular: abrir o app e entrar com a biometria. É o que
+prova que `rp_id` não foi tocado. O worker não precisa de conferência ativa —
+`docker compose logs --since 10m worker` em silêncio é o comportamento normal,
+porque ele só escreve linha quando acontece algo.
+
+E a limpeza, de vez em quando: as duas tags são reusadas (`:local`), então cada
+rebuild deixa a imagem anterior pendurada.
+
+```bash
+docker image prune        # só as dangling; não mexe nas duas em uso
+```
+
+### Voltar atrás
+
+Não há registro de imagens nem tag de versão: as imagens são construídas no
+próprio host como `controle-habito-app:local` e `controle-habito-worker:local`.
+Então "voltar à imagem anterior" é reconstruir do commit anterior:
+
+```bash
+git log --oneline -5
+git checkout <commit>
+docker compose up -d --build
+```
+
+Isso basta **se a versão nova não trouxe migration**. Se trouxe, o banco já está
+no schema novo e a imagem velha não o entende. Duas saídas, nesta ordem:
+
+```bash
+# 1. reverter o último lote de migrations — devolve o SCHEMA, não o dado
+docker compose run --rm worker tsx db/cli.ts rollback
+
+# 2. se a volta era lossy (0009, 0010) ou o rollback falhar: o dump
+./infra/restaurar.sh <o dump de antes da atualização>
+```
+
+> **`tsx db/cli.ts reset` não tem guarda e apaga tudo.** Ele é
+> `rollback --all` + `latest` + `seed`, pensado para desenvolvimento, e nada no
+> código impede que rode em produção. Em produção o comando é `rollback`, que
+> reverte **um** lote. Ver [db/cli.ts](../db/cli.ts).
 
 ---
 
@@ -564,6 +727,8 @@ Se os cinco passos fecharem, o backup é um backup.
 | Sintoma | Causa provável |
 |---|---|
 | `migrate` sai com erro de conexão | `POSTGRES_PASSWORD` com caractere que quebra a URL (`@`, `:`, `/`, `#`) |
+| depois de um `git pull`, app e worker não sobem | o `migrate` falhou, e os dois dependem dele com `service_completed_successfully`. `docker compose logs migrate` diz em qual migration parou — ver [Atualização](#atualização) |
+| a versão nova sobe e uma rota responde 500 | variável nova no `.env` do repositório que não foi para o `.env` do servidor: o contêiner sobe sem ela e falha na primeira requisição que a leia |
 | `migrate` reclama de `APP_SENHA_INICIAL` | primeira subida com a variável vazia |
 | `app` fica `unhealthy` | o healthcheck chama `/api/auth/estado`, que consulta o banco; `docker compose logs app` mostra o erro por trás |
 | `502` no domínio | o `app` não está saudável, ou o `proxy_pass` aponta para porta errada. Os três degraus do passo 5 dizem qual |
